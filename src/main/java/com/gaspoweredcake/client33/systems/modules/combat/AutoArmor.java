@@ -103,6 +103,7 @@ public class AutoArmor extends Module {
 
     @EventHandler
     private void onPreTick(TickEvent.Pre event) {
+        if (mc.player.containerMenu != mc.player.inventoryMenu || !mc.player.containerMenu.getCarried().isEmpty()) return;
         // Wait for timer (delay)
         if (timer > 0) {
             timer--;
@@ -155,7 +156,8 @@ public class AutoArmor extends Module {
 
     private int getItemSlotId(ItemStack itemStack) {
         if (itemStack.has(DataComponents.GLIDER)) return 2;
-        return itemStack.get(DataComponents.EQUIPPABLE).slot().getIndex();
+        var equippable = itemStack.get(DataComponents.EQUIPPABLE);
+        return equippable == null ? -1 : equippable.slot().getIndex();
     }
 
     private int getScore(ItemStack itemStack) {
@@ -242,6 +244,7 @@ public class AutoArmor extends Module {
 
         private int bestSlot;
         private int bestScore;
+        private int bestDurability;
 
         private int score;
         private int durability;
@@ -253,6 +256,7 @@ public class AutoArmor extends Module {
         public void reset() {
             bestSlot = -1;
             bestScore = -1;
+            bestDurability = -1;
             score = -1;
             durability = Integer.MAX_VALUE;
         }
@@ -261,9 +265,11 @@ public class AutoArmor extends Module {
             // Calculate armor piece score and check if its higher than the last one
             int score = getScore(itemStack);
 
-            if (score > bestScore) {
+            int remaining = itemStack.isDamageableItem() ? itemStack.getMaxDamage() - itemStack.getDamageValue() : Integer.MAX_VALUE;
+            if (score > bestScore || (score == bestScore && remaining > bestDurability)) {
                 bestScore = score;
                 bestSlot = slot;
+                bestDurability = remaining;
             }
         }
 
@@ -273,7 +279,7 @@ public class AutoArmor extends Module {
             ItemStack itemStack = mc.player.getItemBySlot(slot);
 
             // Check if the item is an elytra
-            if ((ignoreElytra.get() || Modules.get().isActive(ChestSwap.class)) && itemStack.getItem() == Items.ELYTRA) {
+            if ((ignoreElytra.get() || Modules.get().isActive(ChestSwap.class)) && itemStack.has(DataComponents.GLIDER)) {
                 score = Integer.MAX_VALUE; // Setting score to Integer.MAX_VALUE so its now swapped later
                 return;
             }
@@ -292,7 +298,7 @@ public class AutoArmor extends Module {
             score = applyAntiBreakScore(score, itemStack);
 
             // Calculate durability
-            if (!itemStack.isEmpty()) {
+            if (itemStack.isDamageableItem()) {
                 durability = itemStack.getMaxDamage() - itemStack.getDamageValue();
             }
         }
@@ -307,7 +313,7 @@ public class AutoArmor extends Module {
             if (cannotSwap() || score == Integer.MAX_VALUE) return;
 
             // Check if new score is better and swap if it is
-            if (bestScore > score) swap(bestSlot, slot.getIndex());
+            if (bestSlot >= 0 && (bestScore > score || (bestScore == score && bestDurability > durability))) swap(bestSlot, slot.getIndex());
             else if (antiBreak.get() && durability <= 10) {
                 // If no better piece has been found but current piece is broken find an empty slot and move it there
                 moveToEmpty(slot.getIndex());

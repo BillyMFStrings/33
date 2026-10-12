@@ -77,6 +77,9 @@ public class SettingCommand extends Command {
 
                                 if (setting.parse(value)) {
                                     ChatUtils.infoPrefix("Config", "Setting (highlight)%s(default) changed to (highlight)%s(default).", setting.title, value);
+                                } else {
+                                    ChatUtils.errorPrefix("Config", "Invalid value for %s.", setting.title);
+                                    return 0;
                                 }
 
                                 return SINGLE_SUCCESS;
@@ -123,6 +126,9 @@ public class SettingCommand extends Command {
 
                                     if (setting.parse(value)) {
                                         ModuleArgumentType.get(context).info("Setting (highlight)%s(default) changed to (highlight)%s(default).", setting.title, value);
+                                    } else {
+                                        ModuleArgumentType.get(context).error("Invalid value for %s.", setting.title);
+                                        return 0;
                                     }
 
                                     return SINGLE_SUCCESS;

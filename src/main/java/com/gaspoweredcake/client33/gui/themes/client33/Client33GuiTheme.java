@@ -36,9 +36,8 @@ import com.mojang.blaze3d.platform.MacosUtil;
 import static com.gaspoweredcake.client33.Client33.mc;
 
 public class Client33GuiTheme extends GuiTheme {
-    private static final Color SCREEN_TINT = new Color(3, 10, 11, 112);
-    private static final Color GRID_COLOR = new Color(78, 171, 115, 18);
-    private static final String SCREEN_MARK = "33 // СИСТЕМА 2027";
+    private static final Color SCREEN_TINT = new Color(7, 7, 10, 200);
+    private static final String SCREEN_MARK = "33";
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgColors = settings.createGroup("Colors");
@@ -68,7 +67,7 @@ public class Client33GuiTheme extends GuiTheme {
     public final Setting<AlignmentX> moduleAlignment = sgGeneral.add(new EnumSetting.Builder<AlignmentX>()
         .name("module-alignment")
         .description("How module titles are aligned.")
-        .defaultValue(AlignmentX.Center)
+        .defaultValue(AlignmentX.Left)
         .build()
     );
 
@@ -98,57 +97,57 @@ public class Client33GuiTheme extends GuiTheme {
 
     // Colors
 
-    public final Setting<SettingColor> accentColor = color("accent", "Main color of the GUI.", new SettingColor(105, 242, 150));
-    public final Setting<SettingColor> checkboxColor = color("checkbox", "Color of checkbox.", new SettingColor(105, 242, 150));
-    public final Setting<SettingColor> plusColor = color("plus", "Color of plus button.", new SettingColor(88, 223, 211));
+    public final Setting<SettingColor> accentColor = color("accent", "Main color of the GUI.", new SettingColor(245, 66, 85));
+    public final Setting<SettingColor> checkboxColor = color("checkbox", "Color of checkbox.", new SettingColor(245, 66, 85));
+    public final Setting<SettingColor> plusColor = color("plus", "Color of plus button.", new SettingColor(245, 100, 110));
     public final Setting<SettingColor> minusColor = color("minus", "Color of minus button.", new SettingColor(255, 91, 105));
     public final Setting<SettingColor> favoriteColor = color("favorite", "Color of checked favorite button.", new SettingColor(224, 216, 105));
 
     // Text
 
-    public final Setting<SettingColor> textColor = color(sgTextColors, "text", "Color of text.", new SettingColor(224, 246, 232));
-    public final Setting<SettingColor> textSecondaryColor = color(sgTextColors, "text-secondary-text", "Color of secondary text.", new SettingColor(154, 187, 168));
-    public final Setting<SettingColor> textHighlightColor = color(sgTextColors, "text-highlight", "Color of text highlighting.", new SettingColor(105, 242, 150, 110));
-    public final Setting<SettingColor> titleTextColor = color(sgTextColors, "title-text", "Color of title text.", new SettingColor(202, 255, 218));
-    public final Setting<SettingColor> loggedInColor = color(sgTextColors, "logged-in-text", "Color of logged in account name.", new SettingColor(105, 242, 150));
-    public final Setting<SettingColor> placeholderColor = color(sgTextColors, "placeholder", "Color of placeholder text.", new SettingColor(154, 187, 168, 145));
+    public final Setting<SettingColor> textColor = color(sgTextColors, "text", "Color of text.", new SettingColor(230, 237, 247));
+    public final Setting<SettingColor> textSecondaryColor = color(sgTextColors, "text-secondary-text", "Color of secondary text.", new SettingColor(157, 154, 166));
+    public final Setting<SettingColor> textHighlightColor = color(sgTextColors, "text-highlight", "Color of text highlighting.", new SettingColor(245, 66, 85, 110));
+    public final Setting<SettingColor> titleTextColor = color(sgTextColors, "title-text", "Color of title text.", new SettingColor(255, 229, 231));
+    public final Setting<SettingColor> loggedInColor = color(sgTextColors, "logged-in-text", "Color of logged in account name.", new SettingColor(245, 66, 85));
+    public final Setting<SettingColor> placeholderColor = color(sgTextColors, "placeholder", "Color of placeholder text.", new SettingColor(157, 154, 166, 145));
 
     // Background
 
     public final ThreeStateColorSetting backgroundColor = new ThreeStateColorSetting(
             sgBackgroundColors,
             "background",
-            new SettingColor(9, 19, 21, 244),
-            new SettingColor(17, 36, 32, 248),
-            new SettingColor(25, 53, 42, 250)
+            new SettingColor(22, 22, 27, 252),
+            new SettingColor(38, 36, 43, 252),
+            new SettingColor(62, 36, 44, 255)
     );
 
-    public final Setting<SettingColor> moduleBackground = color(sgBackgroundColors, "module-background", "Color of module background when active.", new SettingColor(25, 67, 49, 228));
+    public final Setting<SettingColor> moduleBackground = color(sgBackgroundColors, "module-background", "Color of module background when active.", new SettingColor(78, 27, 39, 240));
 
     // Outline
 
     public final ThreeStateColorSetting outlineColor = new ThreeStateColorSetting(
             sgOutline,
             "outline",
-            new SettingColor(46, 92, 72),
-            new SettingColor(83, 164, 113),
-            new SettingColor(105, 242, 150)
+            new SettingColor(55, 49, 58),
+            new SettingColor(151, 59, 75),
+            new SettingColor(245, 66, 85)
     );
 
     // Separator
 
-    public final Setting<SettingColor> separatorText = color(sgSeparator, "separator-text", "Color of separator text", new SettingColor(181, 239, 198));
-    public final Setting<SettingColor> separatorCenter = color(sgSeparator, "separator-center", "Center color of separators.", new SettingColor(77, 159, 105, 170));
-    public final Setting<SettingColor> separatorEdges = color(sgSeparator, "separator-edges", "Color of separator edges.", new SettingColor(44, 91, 67, 50));
+    public final Setting<SettingColor> separatorText = color(sgSeparator, "separator-text", "Color of separator text", new SettingColor(231, 210, 219));
+    public final Setting<SettingColor> separatorCenter = color(sgSeparator, "separator-center", "Center color of separators.", new SettingColor(159, 77, 95, 170));
+    public final Setting<SettingColor> separatorEdges = color(sgSeparator, "separator-edges", "Color of separator edges.", new SettingColor(57, 47, 59, 50));
 
     // Scrollbar
 
     public final ThreeStateColorSetting scrollbarColor = new ThreeStateColorSetting(
             sgScrollbar,
             "Scrollbar",
-            new SettingColor(44, 91, 67, 200),
-            new SettingColor(75, 151, 102, 220),
-            new SettingColor(105, 242, 150, 235)
+            new SettingColor(57, 47, 59, 200),
+            new SettingColor(151, 52, 76, 220),
+            new SettingColor(245, 66, 85, 235)
     );
 
     // Slider
@@ -156,13 +155,13 @@ public class Client33GuiTheme extends GuiTheme {
     public final ThreeStateColorSetting sliderHandle = new ThreeStateColorSetting(
             sgSlider,
             "slider-handle",
-            new SettingColor(105, 242, 150),
-            new SettingColor(153, 255, 183),
-            new SettingColor(202, 255, 218)
+            new SettingColor(245, 66, 85),
+            new SettingColor(255, 153, 163),
+            new SettingColor(255, 229, 231)
     );
 
-    public final Setting<SettingColor> sliderLeft = color(sgSlider, "slider-left", "Color of slider left part.", new SettingColor(75, 186, 117));
-    public final Setting<SettingColor> sliderRight = color(sgSlider, "slider-right", "Color of slider right part.", new SettingColor(31, 61, 48));
+    public final Setting<SettingColor> sliderLeft = color(sgSlider, "slider-left", "Color of slider left part.", new SettingColor(203, 48, 68));
+    public final Setting<SettingColor> sliderRight = color(sgSlider, "slider-right", "Color of slider right part.", new SettingColor(48, 42, 51));
 
     // Starscript
 
@@ -187,18 +186,8 @@ public class Client33GuiTheme extends GuiTheme {
     public void renderBackground(GuiRenderer renderer, double width, double height) {
         renderer.quad(0, 0, width, height, SCREEN_TINT);
 
-        double step = scale(64);
-        double line = scale(1);
-        for (double x = 0; x < width; x += step) renderer.quad(x, 0, line, height, GRID_COLOR);
-        for (double y = 0; y < height; y += step) renderer.quad(0, y, width, line, GRID_COLOR);
-
-        double mark = scale(14);
-        double inset = scale(12);
-        Color accent = accentColor.get();
-        renderer.quad(inset, inset, mark, line, accent);
-        renderer.quad(inset, inset, line, mark, accent);
-        renderer.quad(width - inset - mark, height - inset - line, mark, line, accent);
-        renderer.quad(width - inset - line, height - inset - mark, line, mark, accent);
+        double line = scale(2);
+        renderer.quad(0, 0, width, line, accentColor.get());
 
         renderer.text(SCREEN_MARK, width - textWidth(SCREEN_MARK) - scale(36), height - textHeight() - scale(9), textSecondaryColor.get(), false);
     }

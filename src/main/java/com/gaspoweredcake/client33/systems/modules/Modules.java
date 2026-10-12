@@ -51,7 +51,6 @@ import com.mojang.blaze3d.platform.InputConstants;
 
 import java.io.File;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static com.gaspoweredcake.client33.Client33.mc;
 
@@ -301,28 +300,20 @@ public class Modules extends System<Modules> {
         }
     }
 
+    private boolean worldAvailable;
+
+    boolean canRunModules() { return worldAvailable && Utils.canUpdate(); }
+
     @EventHandler
     private void onGameJoined(GameJoinedEvent event) {
-        synchronized (active) {
-            for (Module module : getAll()) {
-                if (module.isActive() && !module.runInMainMenu) {
-                    Client33.EVENT_BUS.subscribe(module);
-                    module.onActivate();
-                }
-            }
-        }
+        worldAvailable = true;
+        for (Module module : getAll()) module.updateAvailability();
     }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
-        synchronized (active) {
-            for (Module module : getAll()) {
-                if (module.isActive() && !module.runInMainMenu) {
-                    Client33.EVENT_BUS.unsubscribe(module);
-                    module.onDeactivate();
-                }
-            }
-        }
+        worldAvailable = false;
+        for (Module module : getAll()) module.updateAvailability();
     }
 
     public void disableAll() {
@@ -353,7 +344,7 @@ public class Modules extends System<Modules> {
 
         ListTag modulesTag = tag.getListOrEmpty("modules");
         for (Tag moduleTagI : modulesTag) {
-            CompoundTag moduleTag = (CompoundTag) moduleTagI;
+            if (!(moduleTagI instanceof CompoundTag moduleTag)) continue;
             Module module = get(moduleTag.getStringOr("name", ""));
             if (module != null) module.fromTag(moduleTag);
         }
@@ -369,19 +360,14 @@ public class Modules extends System<Modules> {
             throw new RuntimeException("Modules.addModule - Module's category was not registered.");
         }
 
-        // Remove the previous module with the same name
-        AtomicReference<Module> removedModule = new AtomicReference<>();
-        if (moduleInstances.values().removeIf(module1 -> {
-            if (module1.name.equals(module.name)) {
-                removedModule.set(module1);
-                module1.settings.unregisterColorSettings();
-
-                return true;
-            }
-
-            return false;
-        })) {
-            getGroup(removedModule.get().category).remove(removedModule.get());
+        // Release replaced instances before registering a new name/class owner.
+        var replacements = moduleInstances.values().stream()
+            .filter(previous -> previous.getClass() == module.getClass() || previous.name.equalsIgnoreCase(module.name)).toList();
+        for (Module previous : replacements) {
+            previous.disable();
+            previous.settings.unregisterColorSettings();
+            getGroup(previous.category).remove(previous);
+            moduleInstances.remove(previous.getClass());
         }
 
         // Add the module
@@ -416,6 +402,7 @@ public class Modules extends System<Modules> {
         add(new Hitboxes());
         add(new HoleFiller());
         add(new KillAura());
+        add(new ShieldPredict());
         add(new Offhand());
         add(new Quiver());
         add(new SelfAnvil());
@@ -506,6 +493,10 @@ public class Modules extends System<Modules> {
         add(new CityESP());
         add(new EntityOwner());
         add(new ESP());
+        add(new CombatVisuals());
+        add(new FactionIntel());
+        add(new MovementHeatmap());
+        add(new StructureESP());
         add(new Freecam());
         add(new FreeLook());
         add(new Fullbright());

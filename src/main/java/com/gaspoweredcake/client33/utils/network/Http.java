@@ -19,6 +19,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.Date;
+import java.time.Duration;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -32,6 +33,7 @@ public class Http {
 
     private static final HttpClient CLIENT = HttpClient.newBuilder()
         .executor(Executors.newVirtualThreadPerTaskExecutor())
+        .connectTimeout(Duration.ofSeconds(10))
         .build();
 
     private static final Gson GSON = new GsonBuilder()
@@ -45,16 +47,22 @@ public class Http {
 
     public static class Request {
         private final HttpRequest.Builder builder;
-        private Method method;
+        private final Method method;
+        private HttpRequest.BodyPublisher body = HttpRequest.BodyPublishers.noBody();
         private Consumer<Exception> exceptionHandler = Exception::printStackTrace;
 
         private Request(Method method, String url) {
             try {
-                this.builder = HttpRequest.newBuilder().uri(new URI(url)).header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36");
+                this.builder = HttpRequest.newBuilder().uri(new URI(url)).timeout(Duration.ofSeconds(30)).header("User-Agent", "33/26.2 (Fabric)");
                 this.method = method;
             } catch (URISyntaxException e) {
                 throw new IllegalArgumentException(e);
             }
+        }
+
+        public Request timeout(Duration timeout) {
+            builder.timeout(timeout);
+            return this;
         }
 
         public Request header(String name, String value) {
@@ -70,33 +78,29 @@ public class Http {
         }
 
         public Request bodyString(String string) {
-            builder.header("Content-Type", "text/plain");
-            builder.method(method.name(), HttpRequest.BodyPublishers.ofString(string));
-            method = null;
+            builder.setHeader("Content-Type", "text/plain");
+            body = HttpRequest.BodyPublishers.ofString(string);
 
             return this;
         }
 
         public Request bodyForm(String string) {
-            builder.header("Content-Type", "application/x-www-form-urlencoded");
-            builder.method(method.name(), HttpRequest.BodyPublishers.ofString(string));
-            method = null;
+            builder.setHeader("Content-Type", "application/x-www-form-urlencoded");
+            body = HttpRequest.BodyPublishers.ofString(string);
 
             return this;
         }
 
         public Request bodyJson(String string) {
-            builder.header("Content-Type", "application/json");
-            builder.method(method.name(), HttpRequest.BodyPublishers.ofString(string));
-            method = null;
+            builder.setHeader("Content-Type", "application/json");
+            body = HttpRequest.BodyPublishers.ofString(string);
 
             return this;
         }
 
         public Request bodyJson(Object object) {
-            builder.header("Content-Type", "application/json");
-            builder.method(method.name(), HttpRequest.BodyPublishers.ofString(GSON.toJson(object)));
-            method = null;
+            builder.setHeader("Content-Type", "application/json");
+            body = HttpRequest.BodyPublishers.ofString(GSON.toJson(object));
 
             return this;
         }
@@ -113,14 +117,18 @@ public class Http {
         }
 
         private <T> HttpResponse<T> _sendResponse(String accept, HttpResponse.BodyHandler<T> responseBodyHandler) {
-            builder.header("Accept", accept);
-            if (method != null) builder.method(method.name(), HttpRequest.BodyPublishers.noBody());
+            builder.setHeader("Accept", accept);
+            builder.method(method.name(), body);
 
             HttpRequest request = builder.build();
 
             try {
                 return CLIENT.send(request, responseBodyHandler);
-            } catch (IOException | InterruptedException e) {
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                exceptionHandler.accept(e);
+                return new FailedHttpResponse<>(request, e);
+            } catch (IOException e) {
                 exceptionHandler.accept(e);
                 return new FailedHttpResponse<>(request, e);
             }
@@ -129,7 +137,12 @@ public class Http {
         @Nullable
         private <T> T _send(String accept, HttpResponse.BodyHandler<T> responseBodyHandler) {
             HttpResponse<T> res = _sendResponse(accept, responseBodyHandler);
-            return res.statusCode() == 200 ? res.body() : null;
+            if (res.statusCode() >= 200 && res.statusCode() < 300) return res.body();
+            // Rejected streaming responses still own a connection until closed.
+            if (res.body() instanceof AutoCloseable resource) {
+                try { resource.close(); } catch (Exception e) { exceptionHandler.accept(e); }
+            }
+            return null;
         }
 
         public void send() {

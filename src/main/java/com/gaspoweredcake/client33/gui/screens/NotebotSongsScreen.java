@@ -57,8 +57,8 @@ public class NotebotSongsScreen extends WindowScreen {
 
     private void initSongsTable() {
         AtomicBoolean noSongsFound = new AtomicBoolean(true);
-        try {
-            Files.list(Client33.FOLDER.toPath().resolve("notebot")).forEach(path -> {
+        try (var songs = Files.list(Client33.FOLDER.toPath().resolve("notebot"))) {
+            songs.filter(Files::isRegularFile).sorted().forEach(path -> {
                 if (SongDecoders.hasDecoder(path)) {
                     String name = path.getFileName().toString();
 

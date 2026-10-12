@@ -20,6 +20,8 @@ import com.gaspoweredcake.client33.renderer.ShapeMode;
 import com.gaspoweredcake.client33.renderer.text.TextRenderer;
 import com.gaspoweredcake.client33.settings.*;
 import com.gaspoweredcake.client33.systems.friends.Friends;
+import com.gaspoweredcake.client33.utils.combat.ExplosionRisk;
+import com.gaspoweredcake.client33.utils.combat.CombatTelemetry;
 import com.gaspoweredcake.client33.systems.modules.Categories;
 import com.gaspoweredcake.client33.systems.modules.Module;
 import com.gaspoweredcake.client33.utils.entity.DamageUtils;
@@ -69,6 +71,19 @@ import java.util.concurrent.atomic.AtomicReference;
 public class CrystalAura extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgSwitch = settings.createGroup("Switch");
+    private final SettingGroup sgNetwork = settings.createGroup("Server pacing & risk");
+    private final Setting<Boolean> serverPacing = sgNetwork.add(new BoolSetting.Builder().name("server-pacing")
+        .description("Scale action delays with observed server ticks and wait for spawn/remove acknowledgements.").defaultValue(true).build());
+    private final Setting<Double> healthReserve = sgNetwork.add(new DoubleSetting.Builder().name("health-reserve")
+        .description("Minimum health plus absorption to retain after an estimated explosion when Anti Suicide is enabled.").defaultValue(2).range(0, 20).sliderRange(0, 20).build());
+    private final Setting<Double> damageAdvantage = sgNetwork.add(new DoubleSetting.Builder().name("damage-advantage")
+        .description("Required target damage minus self damage; zero disables this additional filter.").defaultValue(0).range(0, 20).sliderRange(0, 20).build());
+    private final Setting<Boolean> protectFriends = sgNetwork.add(new BoolSetting.Builder().name("protect-friends")
+        .description("Reject explosions predicted to exceed the friend damage limit.").defaultValue(true).build());
+    private final Setting<Double> maxFriendDamage = sgNetwork.add(new DoubleSetting.Builder().name("max-friend-damage")
+        .description("Maximum estimated damage allowed to a nearby friend.").defaultValue(4).range(0, 36).sliderRange(0, 36).build());
+    private long actionGeneration;
+
     private final SettingGroup sgPlace = settings.createGroup("Place");
     private final SettingGroup sgFacePlace = settings.createGroup("Face Place");
     private final SettingGroup sgBreak = settings.createGroup("Break");
@@ -631,6 +646,7 @@ public class CrystalAura extends Module {
 
     @Override
     public void onDeactivate() {
+        actionGeneration++;
         targets.clear();
 
         placedCrystals.clear();
@@ -649,6 +665,7 @@ public class CrystalAura extends Module {
 
     @EventHandler(priority = EventPriority.HIGH)
     private void onPreTick(TickEvent.Pre event) {
+        actionGeneration++;
         // Update last rotation
         didRotateThisTick = false;
         lastRotationTimer++;
@@ -688,7 +705,7 @@ public class CrystalAura extends Module {
             int id = it.nextInt();
             int ticks = waitingToExplode.get(id);
 
-            if (ticks > 3) {
+            if (ticks > (serverPacing.get() ? CombatTelemetry.acknowledgementTicks() : 3)) {
                 it.remove();
                 removed.remove(id);
             } else {
@@ -798,7 +815,7 @@ public class CrystalAura extends Module {
         // Check damage to self and anti suicide
         blockPos.set(entity.blockPosition()).move(0, -1, 0);
         float selfDamage = DamageUtils.crystalDamage(mc.player, entity.position(), predictMovement.get(), blockPos);
-        if (selfDamage > maxDamage.get() || (antiSuicide.get() && selfDamage >= EntityUtils.getTotalHealth(mc.player)))
+        if (selfDamage > maxDamage.get() || (antiSuicide.get() && selfDamage + healthReserve.get() >= EntityUtils.getTotalHealth(mc.player)))
             return 0;
 
         // Check damage to targets and face place
@@ -806,12 +823,17 @@ public class CrystalAura extends Module {
         boolean shouldFacePlace = shouldFacePlace();
         double minimumDamage = shouldFacePlace ? Math.min(minDamage.get(), 1.5d) : minDamage.get();
 
-        if (damage < minimumDamage) return 0f;
+        if (damage < minimumDamage || !safeExplosion(entity.position(), blockPos)
+            || !ExplosionRisk.advantage(damage, selfDamage, damageAdvantage.get())) return 0f;
 
         return damage;
     }
 
     private void doBreak(Entity crystal) {
+        if (!isActive() || !doBreak.get() || shouldPause(PauseMode.Break) || switchTimer > 0
+            || attacks >= attackFrequency.get() || (serverPacing.get() && CombatTelemetry.CLOCK.stale(CombatTelemetry.now()))) return;
+        long generation = actionGeneration;
+
         // Anti weakness
         if (antiWeakness.get()) {
             MobEffectInstance weakness = mc.player.getEffect(MobEffects.WEAKNESS);
@@ -832,7 +854,6 @@ public class CrystalAura extends Module {
         }
 
         // Rotate and attack
-        boolean attacked = true;
 
         if (rotate.get()) {
             double yaw = Rotations.getYaw(crystal);
@@ -840,27 +861,15 @@ public class CrystalAura extends Module {
 
             if (doYawSteps(yaw, pitch)) {
                 setRotation(true, crystal.position(), 0, 0);
-                Rotations.rotate(yaw, pitch, 50, () -> attackCrystal(crystal));
+                Rotations.rotate(yaw, pitch, 50, () -> { if (generation == actionGeneration) attackCrystal(crystal); });
 
-                breakTimer = breakDelay.get();
-            } else {
-                attacked = false;
+                breakTimer = pacedDelay(breakDelay.get());
             }
         } else {
             attackCrystal(crystal);
-            breakTimer = breakDelay.get();
+            breakTimer = pacedDelay(breakDelay.get());
         }
 
-        if (attacked) {
-            // Update state
-            removed.add(crystal.getId());
-            attemptedBreaks.put(crystal.getId(), attemptedBreaks.get(crystal.getId()) + 1);
-            waitingToExplode.put(crystal.getId(), 0);
-
-            // Break render
-            breakRenderPos.set(crystal.blockPosition().below());
-            breakRenderTimer = breakRenderTime.get();
-        }
     }
 
     private boolean isValidWeaknessItem(ItemStack itemStack, Entity crystal) {
@@ -868,6 +877,16 @@ public class CrystalAura extends Module {
     }
 
     private void attackCrystal(Entity entity) {
+        if (!isActive() || mc.player == null || mc.level == null || entity.level() != mc.level || entity.isRemoved()
+            || shouldPause(PauseMode.Break) || switchTimer > 0 || attacks >= attackFrequency.get()) return;
+        float damage = getBreakDamage(entity, false);
+        if (!Float.isFinite(damage) || damage <= 0) return;
+        // State is recorded only when the deferred action actually executes.
+        removed.add(entity.getId());
+        attemptedBreaks.put(entity.getId(), attemptedBreaks.get(entity.getId()) + 1);
+        waitingToExplode.put(entity.getId(), 0);
+        breakRenderPos.set(entity.blockPosition().below());
+        breakRenderTimer = breakRenderTime.get();
         // Attack
         mc.player.connection.send(new ServerboundAttackPacket(entity.getId()));
 
@@ -890,6 +909,8 @@ public class CrystalAura extends Module {
     // Place
 
     private void doPlace() {
+        if (serverPacing.get() && (placing || CombatTelemetry.CLOCK.stale(CombatTelemetry.now()))) return;
+        long generation = actionGeneration;
         if (!doPlace.get() || placeTimer > 0) return;
         if (shouldPause(PauseMode.Place)) return;
 
@@ -939,7 +960,7 @@ public class CrystalAura extends Module {
 
             // Check damage to self and anti suicide
             float selfDamage = DamageUtils.crystalDamage(mc.player, vec3d, predictMovement.get(), bp);
-            if (selfDamage > maxDamage.get() || (antiSuicide.get() && selfDamage >= EntityUtils.getTotalHealth(mc.player)))
+            if (selfDamage > maxDamage.get() || (antiSuicide.get() && selfDamage + healthReserve.get() >= EntityUtils.getTotalHealth(mc.player)))
                 return;
 
             // Check damage to targets and face place
@@ -948,7 +969,8 @@ public class CrystalAura extends Module {
             boolean shouldFacePlace = shouldFacePlace();
             double minimumDamage = Math.min(minDamage.get(), shouldFacePlace ? 1.5 : minDamage.get());
 
-            if (damage < minimumDamage) return;
+            if (damage < minimumDamage || !safeExplosion(vec3d, bp)
+                || !ExplosionRisk.advantage(damage, selfDamage, damageAdvantage.get())) return;
 
             // Check if it can be placed
             double x = bp.getX();
@@ -969,7 +991,7 @@ public class CrystalAura extends Module {
 
         // Place the crystal
         BlockIterator.after(() -> {
-            if (bestDamage.get() == 0) return;
+            if (!isActive() || generation != actionGeneration || mc.player == null || bestDamage.get() == 0) return;
 
             BlockHitResult result = getPlaceInfo(bestBlockPos.get());
 
@@ -985,13 +1007,13 @@ public class CrystalAura extends Module {
 
                 if (yawStepMode.get() == YawStepMode.Break || doYawSteps(yaw, pitch)) {
                     setRotation(true, vec3d, 0, 0);
-                    Rotations.rotate(yaw, pitch, 50, () -> placeCrystal(result, bestDamage.get(), isSupport.get() ? bestBlockPos.get() : null));
+                    Rotations.rotate(yaw, pitch, 50, () -> { if (generation == actionGeneration) placeCrystal(result, bestDamage.get(), isSupport.get() ? bestBlockPos.get().immutable() : null); });
 
-                    placeTimer += placeDelay.get();
+                    placeTimer += pacedDelay(placeDelay.get());
                 }
             } else {
                 placeCrystal(result, bestDamage.get(), isSupport.get() ? bestBlockPos.get() : null);
-                placeTimer += placeDelay.get();
+                placeTimer += pacedDelay(placeDelay.get());
             }
         });
     }
@@ -1019,6 +1041,21 @@ public class CrystalAura extends Module {
     }
 
     private void placeCrystal(BlockHitResult result, double damage, BlockPos supportBlock) {
+        if (!isActive() || mc.player == null || mc.level == null || shouldPause(PauseMode.Place)) return;
+        BlockPos base = result.getBlockPos();
+        Vec3 explosion = new Vec3(base.getX() + 0.5, base.getY() + 1, base.getZ() + 0.5);
+        if (isOutOfRange(explosion, base, true) || !safeExplosion(explosion, base)) return;
+        if (supportBlock == null) {
+            if (!(mc.level.getBlockState(base).is(Blocks.OBSIDIAN) || mc.level.getBlockState(base).is(Blocks.BEDROCK))
+                || !mc.level.getBlockState(base.above()).isAir()
+                || (placement112.get() && !mc.level.getBlockState(base.above(2)).isAir())) return;
+            float currentDamage = getDamageToTargets(explosion, base, false, false);
+            float selfDamage = DamageUtils.crystalDamage(mc.player, explosion, predictMovement.get(), base);
+            if (currentDamage < (shouldFacePlace() ? Math.min(minDamage.get(), 1.5) : minDamage.get())
+                || !ExplosionRisk.advantage(currentDamage, selfDamage, damageAdvantage.get())) return;
+            ((IAABB) box).client33$set(base.getX(), base.getY() + 1, base.getZ(), base.getX() + 1, base.getY() + (placement112.get() ? 2 : 3), base.getZ() + 1);
+            if (intersectsWithEntities(box)) return;
+        }
         // Switch
         Item targetItem = supportBlock == null ? Items.END_CRYSTAL : Items.OBSIDIAN;
 
@@ -1041,7 +1078,7 @@ public class CrystalAura extends Module {
             if (swingMode.get().packet()) mc.getConnection().send(new ServerboundSwingPacket(hand));
 
             placing = true;
-            placingTimer = 4;
+            placingTimer = serverPacing.get() ? CombatTelemetry.acknowledgementTicks() : 4;
             kaTimer = 8;
             placingCrystalBlockPos.set(result.getBlockPos()).move(0, 1, 0);
 
@@ -1071,6 +1108,21 @@ public class CrystalAura extends Module {
 
         // Switch back
         if (autoSwitch.get() == AutoSwitchMode.Silent) InvUtils.swap(prevSlot, false);
+    }
+
+    private int pacedDelay(int ticks) {
+        return serverPacing.get() ? (int) Math.min(1200, Math.ceil(ticks * CombatTelemetry.CLOCK.tickMillis() / 50)) : ticks;
+    }
+
+    private boolean safeExplosion(Vec3 position, BlockPos base) {
+        float self = DamageUtils.crystalDamage(mc.player, position, predictMovement.get(), base);
+        if (!ExplosionRisk.safeSelf(self, maxDamage.get(), EntityUtils.getTotalHealth(mc.player), healthReserve.get(), antiSuicide.get())) return false;
+        if (protectFriends.get()) for (Player friend : mc.level.players()) {
+            if (friend == mc.player || !Friends.get().isFriend(friend) || friend.distanceToSqr(position) > 144) continue;
+            float damage = DamageUtils.crystalDamage(friend, position, predictMovement.get(), base);
+            if (!ExplosionRisk.safeFriend(damage, maxFriendDamage.get(), EntityUtils.getTotalHealth(friend))) return false;
+        }
+        return true;
     }
 
     // Yaw steps

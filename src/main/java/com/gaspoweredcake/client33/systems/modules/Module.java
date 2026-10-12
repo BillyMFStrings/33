@@ -15,6 +15,7 @@ import com.gaspoweredcake.client33.systems.config.Config;
 import com.gaspoweredcake.client33.utils.Utils;
 import com.gaspoweredcake.client33.utils.misc.ISerializable;
 import com.gaspoweredcake.client33.utils.misc.Keybind;
+import com.gaspoweredcake.client33.utils.misc.ModuleLifecycle;
 import com.gaspoweredcake.client33.utils.player.ChatUtils;
 import com.gaspoweredcake.client33.utils.render.color.Color;
 import net.minecraft.ChatFormatting;
@@ -39,7 +40,8 @@ public abstract class Module implements ISerializable<Module>, Comparable<Module
     public final Client33Addon addon;
     public final Settings settings = new Settings();
 
-    private boolean active;
+    private final ModuleLifecycle lifecycle;
+    private boolean autoSubscribed;
 
     public boolean serialize = true;
     public boolean runInMainMenu = false;
@@ -60,6 +62,25 @@ public abstract class Module implements ISerializable<Module>, Comparable<Module
         this.title = Utils.nameToTitle(name);
         this.description = description;
         this.aliases = aliases;
+        lifecycle = new ModuleLifecycle(
+            () -> {
+                if (autoSubscribe) {
+                    Client33.EVENT_BUS.subscribe(this);
+                    autoSubscribed = true;
+                }
+                onActivate();
+            },
+            () -> {
+                if (autoSubscribed) Client33.EVENT_BUS.unsubscribe(this);
+                autoSubscribed = false;
+                onDeactivate();
+            },
+            enabled -> {
+                if (enabled) Modules.get().addActive(this);
+                else Modules.get().removeActive(this);
+            },
+            failure -> Client33.LOG.error("Module '{}' lifecycle failed; disabled.", name, failure)
+        );
         this.color = Color.fromHsv(Utils.random(0.0, 360.0), 0.35, 1);
 
         String classname = this.getClass().getName();
@@ -88,33 +109,34 @@ public abstract class Module implements ISerializable<Module>, Comparable<Module
     }
 
     public void toggle() {
-        if (!active) {
-            active = true;
-            Modules.get().addActive(this);
+        if (!mc.isSameThread()) { mc.execute(this::toggle); return; }
+        setEnabled(!isActive());
+    }
 
-            settings.onActivated();
-
-            if (runInMainMenu || Utils.canUpdate()) {
-                if (autoSubscribe) Client33.EVENT_BUS.subscribe(this);
-                onActivate();
+    private void setEnabled(boolean enabling) {
+        if (!mc.isSameThread()) { mc.execute(() -> setEnabled(enabling)); return; }
+        if (enabling == isActive()) return;
+        if (enabling) {
+            try {
+                settings.onActivated();
+            } catch (RuntimeException failure) {
+                Client33.LOG.error("Could not activate settings for module '{}'.", name, failure);
+                return;
             }
-        } else {
-            if (runInMainMenu || Utils.canUpdate()) {
-                if (autoSubscribe) Client33.EVENT_BUS.unsubscribe(this);
-                onDeactivate();
-            }
-
-            active = false;
-            Modules.get().removeActive(this);
         }
+        lifecycle.request(enabling, runInMainMenu || Modules.get().canRunModules());
+    }
+
+    void updateAvailability() {
+        lifecycle.availability(runInMainMenu || Modules.get().canRunModules());
     }
 
     public void enable() {
-        if (!isActive()) toggle();
+        setEnabled(true);
     }
 
     public void disable() {
-        if (isActive()) toggle();
+        setEnabled(false);
     }
 
     public void sendToggledMsg() {
@@ -145,7 +167,7 @@ public abstract class Module implements ISerializable<Module>, Comparable<Module
     }
 
     public boolean isActive() {
-        return active;
+        return lifecycle.enabled();
     }
 
     public String getInfoString() {
@@ -163,7 +185,7 @@ public abstract class Module implements ISerializable<Module>, Comparable<Module
         tag.putBoolean("chatFeedback", chatFeedback);
         tag.putBoolean("favorite", favorite);
         tag.put("settings", settings.toTag());
-        tag.putBoolean("active", active);
+        tag.putBoolean("active", isActive());
 
         return tag;
     }

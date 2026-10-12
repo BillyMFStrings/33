@@ -235,8 +235,8 @@ public class Utils {
     }
 
     public static void scaledProjection() {
-        float width = (float) (mc.getWindow().getWidth() / mc.getWindow().getGuiScale());
-        float height = (float) (mc.getWindow().getHeight() / mc.getWindow().getGuiScale());
+        float width = (float) mc.getWindow().getWidth() / mc.getWindow().getGuiScale();
+        float height = (float) mc.getWindow().getHeight() / mc.getWindow().getGuiScale();
 
         var proj = new Projection();
         proj.setupOrtho(-10, 100, width, height, true);

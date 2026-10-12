@@ -27,7 +27,6 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.util.Util;
 import net.minecraft.world.level.block.state.properties.NoteBlockInstrument;
 
-import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -160,10 +159,8 @@ public class NotebotCommand extends Command {
             Client33.EVENT_BUS.unsubscribe(this);
             return;
         }
-        try {
-            Client33.EVENT_BUS.unsubscribe(this);
-
-            FileWriter file = new FileWriter(path.toFile());
+        Client33.EVENT_BUS.unsubscribe(this);
+        try (var file = java.nio.file.Files.newBufferedWriter(path, java.nio.charset.StandardCharsets.UTF_8)) {
             for (var entry : song.int2ObjectEntrySet()) {
                 int tick = entry.getIntKey();
                 List<Note> notes = entry.getValue();
@@ -176,7 +173,6 @@ public class NotebotCommand extends Command {
                 }
             }
 
-            file.close();
             info("Song saved.");
         } catch (IOException _) {
             info("Couldn't create the file.");

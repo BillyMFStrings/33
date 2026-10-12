@@ -32,6 +32,11 @@ public class CrackedAccount extends Account<CrackedAccount> {
     }
 
     @Override
+    public int hashCode() {
+        return java.util.Objects.hashCode(getUsername());
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (!(o instanceof CrackedAccount account)) return false;
         return account.getUsername().equals(this.getUsername());

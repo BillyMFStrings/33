@@ -49,6 +49,11 @@ public class MicrosoftAccount extends Account<MicrosoftAccount> {
     }
 
     @Override
+    public int hashCode() {
+        return java.util.Objects.hashCode(name);
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (!(o instanceof MicrosoftAccount account)) return false;
         return account.name.equals(this.name);

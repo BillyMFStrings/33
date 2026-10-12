@@ -278,6 +278,11 @@ public class Proxy implements ISerializable<Proxy> {
     }
 
     @Override
+    public int hashCode() {
+        return Objects.hash(address.get(), port.get());
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;

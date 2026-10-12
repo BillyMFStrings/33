@@ -13,12 +13,6 @@ public record FontInfo(String family, Type type) {
         return family + " " + type;
     }
 
-    public boolean equals(FontInfo info) {
-        if (this == info) return true;
-        if (info == null || family == null || type == null) return false;
-        return family.equals(info.family) && type == info.type;
-    }
-
     public enum Type {
         Regular,
         Bold,

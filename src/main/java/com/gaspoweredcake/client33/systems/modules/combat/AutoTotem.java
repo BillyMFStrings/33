@@ -7,6 +7,8 @@ package com.gaspoweredcake.client33.systems.modules.combat;
 
 import com.gaspoweredcake.client33.events.packets.PacketEvent;
 import com.gaspoweredcake.client33.events.world.TickEvent;
+import com.gaspoweredcake.client33.events.game.GameLeftEvent;
+import com.gaspoweredcake.client33.utils.misc.TickTimer;
 import com.gaspoweredcake.client33.settings.*;
 import com.gaspoweredcake.client33.systems.modules.Categories;
 import com.gaspoweredcake.client33.systems.modules.Module;
@@ -74,44 +76,71 @@ public class AutoTotem extends Module {
     );
 
     public boolean locked;
-    private int totems, ticks;
+    private int totems;
+    private final TickTimer moveTimer = new TickTimer();
 
     public AutoTotem() {
         super(Categories.Combat, "auto-totem", "Automatically equips a totem in your offhand.");
     }
 
+    @Override
+    public void onActivate() {
+        reset();
+    }
+
+    @Override
+    public void onDeactivate() {
+        reset();
+    }
+
+    @EventHandler
+    private void onGameLeft(GameLeftEvent event) {
+        reset();
+    }
+
+    private void reset() {
+        locked = false;
+        totems = 0;
+        moveTimer.reset();
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST)
     private void onTick(TickEvent.Pre event) {
+        moveTimer.advance();
+        if (mc.player == null || mc.gameMode == null || !mc.player.isAlive() || mc.player.isSpectator()) {
+            locked = false;
+            return;
+        }
         FindItemResult result = InvUtils.find(Items.TOTEM_OF_UNDYING);
         totems = result.count();
-
-        if (totems <= 0) locked = false;
-        else if (ticks >= delay.get()) {
-            boolean low = mc.player.getHealth() + mc.player.getAbsorptionAmount() - PlayerUtils.possibleHealthReductions(explosion.get(), fall.get()) <= health.get();
-            boolean ely = elytra.get() && mc.player.getItemBySlot(EquipmentSlot.CHEST).getItem() == Items.ELYTRA && mc.player.isFallFlying();
-
-            locked = mode.get() == Mode.Strict || (mode.get() == Mode.Smart && (low || ely));
-
-            if (locked && mc.player.getOffhandItem().getItem() != Items.TOTEM_OF_UNDYING) {
-                InvUtils.move().from(result.slot()).toOffhand();
-            }
-
-            ticks = 0;
+        if (totems == 0) {
+            locked = false;
             return;
         }
 
-        ticks++;
+        // Compute protection every tick; inventory delay must not leave the lock stale.
+        locked = mode.get() == Mode.Strict;
+        if (!locked) {
+            double effectiveHealth = mc.player.getHealth() + mc.player.getAbsorptionAmount();
+            boolean flying = elytra.get() && mc.player.getItemBySlot(EquipmentSlot.CHEST).is(Items.ELYTRA) && mc.player.isFallFlying();
+            locked = flying || effectiveHealth <= health.get()
+                || effectiveHealth - PlayerUtils.possibleHealthReductions(explosion.get(), fall.get()) <= health.get();
+        }
+
+        if (!locked || mc.player.getOffhandItem().is(Items.TOTEM_OF_UNDYING) || !moveTimer.ready()) return;
+        // Never repurpose a container's slot IDs or an item held by the cursor.
+        if (mc.player.containerMenu != mc.player.inventoryMenu || !mc.player.containerMenu.getCarried().isEmpty()) return;
+        if (!result.found()) return;
+        InvUtils.move().from(result.slot()).toOffhand();
+        moveTimer.waitTicks(delay.get());
     }
 
     @EventHandler(priority = EventPriority.HIGH)
     private void onReceivePacket(PacketEvent.Receive event) {
-        if (!(event.packet instanceof ClientboundEntityEventPacket p)) return;
-        if (p.getEventId() != EntityEvent.PROTECTED_FROM_DEATH) return;
-
-        Entity entity = p.getEntity(mc.level);
-        if (entity == null || !(entity.equals(mc.player))) return;
-
-        ticks = 0;
+        if (!(event.packet instanceof ClientboundEntityEventPacket packet) || mc.level == null) return;
+        if (packet.getEventId() != EntityEvent.PROTECTED_FROM_DEATH) return;
+        Entity entity = packet.getEntity(mc.level);
+        if (entity == mc.player) moveTimer.waitTicks(delay.get());
     }
 
     public boolean isLocked() {

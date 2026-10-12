@@ -78,21 +78,19 @@ public class ESPGroup {
         neighbours.remove(blocks.getFirst());
 
         loop:
-        {
-            while (!blocksToCheck.isEmpty()) {
-                ESPBlock b = blocksToCheck.poll();
+        while (!blocksToCheck.isEmpty()) {
+            ESPBlock b = blocksToCheck.poll();
 
-                for (int side : ESPBlock.SIDES) {
-                    if ((b.neighbours & side) != side) continue;
-                    ESPBlock neighbour = b.getSideBlock(side);
+            for (int side : ESPBlock.SIDES) {
+                if ((b.neighbours & side) != side) continue;
+                ESPBlock neighbour = b.getSideBlock(side);
 
-                    if (neighbour != null && remainingBlocks.contains(neighbour)) {
-                        blocksToCheck.offer(neighbour);
-                        remainingBlocks.remove(neighbour);
+                if (neighbour != null && remainingBlocks.contains(neighbour)) {
+                    blocksToCheck.offer(neighbour);
+                    remainingBlocks.remove(neighbour);
 
-                        neighbours.remove(neighbour);
-                        if (neighbours.isEmpty()) break loop;
-                    }
+                    neighbours.remove(neighbour);
+                    if (neighbours.isEmpty()) break loop;
                 }
             }
         }

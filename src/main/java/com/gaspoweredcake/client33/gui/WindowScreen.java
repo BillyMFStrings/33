@@ -11,11 +11,13 @@ import com.gaspoweredcake.client33.gui.widgets.containers.WWindow;
 
 public abstract class WindowScreen extends WidgetScreen {
     protected final WWindow window;
+    protected final Cell<WWindow> windowCell;
 
     public WindowScreen(GuiTheme theme, WWidget icon, String title) {
         super(theme, title);
 
-        window = super.add(theme.window(icon, title)).center().widget();
+        windowCell = super.add(theme.window(icon, title)).center();
+        window = windowCell.widget();
         window.view.scrollOnlyWhenMouseOver = false;
     }
 

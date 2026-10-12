@@ -44,7 +44,7 @@ public class PlayerHeadUtils {
         String base64Textures = res2.getPropertyValue("textures");
         if (base64Textures == null) return null;
 
-        TexturesJson textures = new Gson().fromJson(new String(Base64.getDecoder().decode(base64Textures)), TexturesJson.class);
+        TexturesJson textures = new Gson().fromJson(new String(Base64.getDecoder().decode(base64Textures), java.nio.charset.StandardCharsets.UTF_8), TexturesJson.class);
         if (textures.textures.SKIN == null) return null;
 
         return textures.textures.SKIN.url;

@@ -168,7 +168,8 @@ public class Client33 implements ClientModInitializer {
     }
 
     private void toggleGui() {
-        if (Utils.canCloseGui()) mc.gui.screen().onClose();
+        var screen = mc.gui.screen();
+        if (Utils.canCloseGui() && screen != null) screen.onClose();
         else if (Utils.canOpenGui()) Tabs.get().getFirst().openScreen(GuiThemes.get());
     }
 

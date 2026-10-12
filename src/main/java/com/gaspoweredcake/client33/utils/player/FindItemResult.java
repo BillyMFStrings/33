@@ -15,10 +15,11 @@ import static com.gaspoweredcake.client33.Client33.mc;
  */
 public record FindItemResult(int slot, int count) {
     public boolean found() {
-        return slot != -1;
+        return slot >= 0;
     }
 
     public InteractionHand getHand() {
+        if (!found() || mc.player == null) return null;
         if (slot == SlotUtils.OFFHAND) return InteractionHand.OFF_HAND;
         if (slot == mc.player.getInventory().getSelectedSlot()) return InteractionHand.MAIN_HAND;
         return null;

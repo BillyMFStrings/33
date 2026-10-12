@@ -8,6 +8,10 @@ package com.gaspoweredcake.client33.systems.modules.render;
 import com.gaspoweredcake.client33.events.render.Render2DEvent;
 import com.gaspoweredcake.client33.events.render.Render3DEvent;
 import com.gaspoweredcake.client33.renderer.Renderer2D;
+import com.gaspoweredcake.client33.renderer.Renderer3D;
+import com.gaspoweredcake.client33.utils.render.VisualGeometry;
+import com.gaspoweredcake.client33.systems.modules.Modules;
+import com.gaspoweredcake.client33.systems.modules.combat.KillAura;
 import com.gaspoweredcake.client33.renderer.ShapeMode;
 import com.gaspoweredcake.client33.settings.*;
 import com.gaspoweredcake.client33.systems.config.Config;
@@ -17,12 +21,15 @@ import com.gaspoweredcake.client33.systems.modules.Module;
 import com.gaspoweredcake.client33.utils.entity.EntityUtils;
 import com.gaspoweredcake.client33.utils.player.PlayerUtils;
 import com.gaspoweredcake.client33.utils.render.NametagUtils;
+import com.gaspoweredcake.client33.utils.render.ScreenBounds;
+import com.gaspoweredcake.client33.renderer.text.TextRenderer;
 import com.gaspoweredcake.client33.utils.render.WireframeEntityRenderer;
 import com.gaspoweredcake.client33.utils.render.color.Color;
 import com.gaspoweredcake.client33.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.player.Player;
@@ -34,6 +41,14 @@ import java.util.Set;
 
 public class ESP extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
+    private final SettingGroup sgSignature = settings.createGroup("Signature visuals");
+    public final Setting<Boolean> animate = sgSignature.add(new BoolSetting.Builder().name("animate").description("Animate signature ESP scans and orbit markers.").defaultValue(true).build());
+    public final Setting<Boolean> throughWalls = sgSignature.add(new BoolSetting.Builder().name("signature-through-walls").description("Show Hologram and Constellation through terrain.").defaultValue(true).build());
+    public final Setting<Boolean> groundMarker = sgSignature.add(new BoolSetting.Builder().name("ground-marker").description("Draw a segmented footprint under signature ESP.").defaultValue(true).build());
+    public final Setting<Boolean> tether = sgSignature.add(new BoolSetting.Builder().name("target-tether").description("Connect your player to KillAura's selected target in signature modes.").defaultValue(false).build());
+    public final Setting<Integer> detail = sgSignature.add(new IntSetting.Builder().name("signature-detail").description("Geometry segments per entity.").defaultValue(32).range(12, 64).sliderRange(12, 64).build());
+    public final Setting<Integer> entityBudget = sgSignature.add(new IntSetting.Builder().name("signature-budget").description("Maximum entities drawn per frame in signature modes.").defaultValue(64).range(1, 256).sliderRange(1, 256).build());
+    public final Setting<SettingColor> signatureAccent = sgSignature.add(new ColorSetting.Builder().name("signature-accent").description("Secondary scan and telemetry color.").defaultValue(new SettingColor(92, 220, 255, 200)).build());
     private final SettingGroup sgColors = settings.createGroup("Colors");
 
     // General
@@ -130,6 +145,31 @@ public class ESP extends Module {
         .build()
     );
 
+    private final Setting<Double> maxDistance = sgGeneral.add(new DoubleSetting.Builder()
+        .name("max-distance")
+        .description("Maximum distance from the camera for all ESP modes.")
+        .defaultValue(128)
+        .range(1, 512)
+        .sliderRange(16, 256)
+        .build()
+    );
+
+    private final Setting<Boolean> healthBar = sgGeneral.add(new BoolSetting.Builder()
+        .name("health-bar")
+        .description("Shows a health bar beside living entities in 2D mode.")
+        .defaultValue(true)
+        .visible(() -> isScreenMode())
+        .build()
+    );
+
+    private final Setting<Boolean> distanceLabel = sgGeneral.add(new BoolSetting.Builder()
+        .name("distance-label")
+        .description("Shows the distance below each 2D box.")
+        .defaultValue(true)
+        .visible(() -> isScreenMode())
+        .build()
+    );
+
     // Colors
 
     public final Setting<ESPColorMode> colorMode = sgColors.add(new EnumSetting.Builder<ESPColorMode>()
@@ -223,8 +263,9 @@ public class ESP extends Module {
     private final Color sideColor = new Color();
     private final Color baseColor = new Color();
 
-    private final Vector3d pos1 = new Vector3d();
-    private final Vector3d pos2 = new Vector3d();
+    private final ScreenBounds bounds = new ScreenBounds();
+    private final Color healthColor = new Color();
+    private final Color healthBackground = new Color(8, 12, 20, 190);
     private final Vector3d pos = new Vector3d();
 
     private int count;
@@ -237,17 +278,15 @@ public class ESP extends Module {
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        if (mode.get() == Mode._2D) return;
+        if (isScreenMode()) return;
 
         count = 0;
 
-        Entity target = null;
-        if (highlightTarget.get() && targetHitbox.get() && mc.hitResult instanceof EntityHitResult hr)
-            target = hr.getEntity();
-
         for (Entity entity : mc.level.entitiesForRendering()) {
-            if (target != entity && shouldSkip(entity)) continue;
-            if (target == entity || mode.get() == Mode.Box || mode.get() == Mode.Wireframe)
+            if (shouldSkip(entity) || getColor(entity) == null) continue;
+            if ((mode.get() == Mode.Hologram || mode.get() == Mode.Constellation) && count >= entityBudget.get()) break;
+            if (mode.get() == Mode.Hologram || mode.get() == Mode.Constellation) drawSignature(event, entity);
+            if ((drawAsTarget(entity) && targetHitbox.get()) || mode.get() == Mode.Box || mode.get() == Mode.Wireframe)
                 drawBoundingBox(event, entity);
             count++;
         }
@@ -255,10 +294,9 @@ public class ESP extends Module {
 
     private void drawBoundingBox(Render3DEvent event, Entity entity) {
         Color color = getColor(entity);
-        if (color != null) {
-            lineColor.set(color);
-            sideColor.set(color).a((int) (sideColor.a * fillOpacity.get()));
-        }
+        if (color == null) return;
+        lineColor.set(color);
+        sideColor.set(color).a((int) (sideColor.a * fillOpacity.get()));
 
         if (mode.get() == Mode.Wireframe) {
             WireframeEntityRenderer.render(event, entity, 1, sideColor, lineColor, shapeMode.get());
@@ -273,7 +311,7 @@ public class ESP extends Module {
 
             ShapeMode shape = shapeMode.get();
             if (target && mode.get() != Mode.Box) shape = ShapeMode.Lines;
-            if (target) lineColor.set(targetHitboxColor.get());
+            if (target && targetHitbox.get()) lineColor.set(targetHitboxColor.get());
 
             AABB box = entity.getBoundingBox();
             event.renderer.box(x + box.minX, y + box.minY, z + box.minZ, x + box.maxX, y + box.maxY, z + box.maxZ, sideColor, lineColor, shape, 0);
@@ -284,9 +322,11 @@ public class ESP extends Module {
 
     @EventHandler
     private void onRender2D(Render2DEvent event) {
-        if (mode.get() != Mode._2D) return;
+        if (!isScreenMode()) return;
 
         Renderer2D.COLOR.begin();
+        TextRenderer text = TextRenderer.get();
+        if (distanceLabel.get()) text.begin(event.graphics, 0.8);
         count = 0;
 
         for (Entity entity : mc.level.entitiesForRendering()) {
@@ -298,86 +338,101 @@ public class ESP extends Module {
             double y = Mth.lerp(event.tickDelta, entity.yOld, entity.getY()) - entity.getY();
             double z = Mth.lerp(event.tickDelta, entity.zOld, entity.getZ()) - entity.getZ();
 
-            // Keep the screen bounds from all visible corners.
-            pos1.set(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY);
-            pos2.set(Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY);
-
-            boolean visible = checkCorner(box.minX + x, box.minY + y, box.minZ + z, pos1, pos2);
-            visible |= checkCorner(box.maxX + x, box.minY + y, box.minZ + z, pos1, pos2);
-            visible |= checkCorner(box.minX + x, box.minY + y, box.maxZ + z, pos1, pos2);
-            visible |= checkCorner(box.maxX + x, box.minY + y, box.maxZ + z, pos1, pos2);
-            visible |= checkCorner(box.minX + x, box.maxY + y, box.minZ + z, pos1, pos2);
-            visible |= checkCorner(box.maxX + x, box.maxY + y, box.minZ + z, pos1, pos2);
-            visible |= checkCorner(box.minX + x, box.maxY + y, box.maxZ + z, pos1, pos2);
-            visible |= checkCorner(box.maxX + x, box.maxY + y, box.maxZ + z, pos1, pos2);
-
-            double width = pos2.x - pos1.x;
-            double height = pos2.y - pos1.y;
-            if (!visible || width <= 1 || height <= 1) continue;
+            if (!projectBounds(box, x, y, z)) continue;
+            double width = bounds.right - bounds.left;
+            double height = bounds.bottom - bounds.top;
 
             Color color = getColor(entity);
             if (color == null) continue;
             lineColor.set(color);
             sideColor.set(color).a((int) (sideColor.a * fillOpacity.get()));
 
-            if (shapeMode.get() != ShapeMode.Lines && sideColor.a > 0) {
-                Renderer2D.COLOR.quad(pos1.x, pos1.y, width, height, sideColor);
+            if (mode.get() != Mode.Telemetry && shapeMode.get() != ShapeMode.Lines && sideColor.a > 0) {
+                Renderer2D.COLOR.quad(bounds.left, bounds.top, width, height, sideColor);
             }
             if (shapeMode.get() != ShapeMode.Sides) {
-                if (cornerBox.get()) {
+                if (cornerBox.get() || mode.get() == Mode.Telemetry) {
                     double length = Math.min(12, Math.min(width, height) * 0.28);
-                    Renderer2D.COLOR.line(pos1.x, pos1.y, pos1.x + length, pos1.y, lineColor);
-                    Renderer2D.COLOR.line(pos1.x, pos1.y, pos1.x, pos1.y + length, lineColor);
-                    Renderer2D.COLOR.line(pos2.x, pos1.y, pos2.x - length, pos1.y, lineColor);
-                    Renderer2D.COLOR.line(pos2.x, pos1.y, pos2.x, pos1.y + length, lineColor);
-                    Renderer2D.COLOR.line(pos1.x, pos2.y, pos1.x + length, pos2.y, lineColor);
-                    Renderer2D.COLOR.line(pos1.x, pos2.y, pos1.x, pos2.y - length, lineColor);
-                    Renderer2D.COLOR.line(pos2.x, pos2.y, pos2.x - length, pos2.y, lineColor);
-                    Renderer2D.COLOR.line(pos2.x, pos2.y, pos2.x, pos2.y - length, lineColor);
+                    Renderer2D.COLOR.line(bounds.left, bounds.top, bounds.left + length, bounds.top, lineColor);
+                    Renderer2D.COLOR.line(bounds.left, bounds.top, bounds.left, bounds.top + length, lineColor);
+                    Renderer2D.COLOR.line(bounds.right, bounds.top, bounds.right - length, bounds.top, lineColor);
+                    Renderer2D.COLOR.line(bounds.right, bounds.top, bounds.right, bounds.top + length, lineColor);
+                    Renderer2D.COLOR.line(bounds.left, bounds.bottom, bounds.left + length, bounds.bottom, lineColor);
+                    Renderer2D.COLOR.line(bounds.left, bounds.bottom, bounds.left, bounds.bottom - length, lineColor);
+                    Renderer2D.COLOR.line(bounds.right, bounds.bottom, bounds.right - length, bounds.bottom, lineColor);
+                    Renderer2D.COLOR.line(bounds.right, bounds.bottom, bounds.right, bounds.bottom - length, lineColor);
                 } else {
-                    Renderer2D.COLOR.boxLines(pos1.x, pos1.y, width, height, lineColor);
+                    Renderer2D.COLOR.boxLines(bounds.left, bounds.top, width, height, lineColor);
                 }
+            }
+
+            if (mode.get() == Mode.Telemetry) {
+                double mid = (bounds.left + bounds.right) / 2;
+                double scanY = bounds.top + height * (animate.get() ? (Math.sin((entity.tickCount + event.tickDelta) * 0.07) + 1) / 2 : 0.5);
+                Renderer2D.COLOR.quad(bounds.left, scanY, width, 1, signatureAccent.get());
+                Renderer2D.COLOR.quad(mid - 2, bounds.top - 7, 4, 4, signatureAccent.get());
+                for (int tick = 0; tick < 6; tick++) {
+                    double ty = bounds.top + height * tick / 5;
+                    Renderer2D.COLOR.quad(bounds.right + 4, ty, tick % 5 == 0 ? 7 : 3, 1, lineColor);
+                }
+            }
+            if (healthBar.get() && entity instanceof LivingEntity living && living.getMaxHealth() > 0) {
+                double fraction = Mth.clamp(living.getHealth() / living.getMaxHealth(), 0, 1);
+                healthColor.set((int) (255 * (1 - fraction)), (int) (220 * fraction), 100, lineColor.a);
+                healthBackground.a(lineColor.a * 3 / 4);
+                Renderer2D.COLOR.quad(bounds.left - 6, bounds.top, 3, height, healthBackground);
+                Renderer2D.COLOR.quad(bounds.left - 6, bounds.bottom - height * fraction, 3, height * fraction, healthColor);
+            }
+            if (distanceLabel.get()) {
+                String label = (mode.get() == Mode.Telemetry ? entity.getName().getString() + " / " : "") + Math.round(Math.sqrt(PlayerUtils.squaredDistanceToCamera(entity.getX(), entity.getY(), entity.getZ()))) + " m";
+                double labelX = Mth.clamp((bounds.left + bounds.right - text.getWidth(label)) / 2, 0,
+                    Math.max(0, mc.getWindow().getWidth() - text.getWidth(label)));
+                double labelY = Math.min(bounds.bottom + 3, mc.getWindow().getHeight() - text.getHeight());
+                text.render(label, labelX, labelY, lineColor, true);
             }
 
             count++;
         }
 
         Renderer2D.COLOR.render();
+        if (distanceLabel.get()) text.end();
     }
 
     public boolean forceRender() {
         return isActive() && (mode.get() == Mode.Shader || mode.get() == Mode.Glow);
     }
 
-    private boolean checkCorner(double x, double y, double z, Vector3d min, Vector3d max) {
-        pos.set(x, y, z);
-        if (!NametagUtils.to2D(pos, 1)) return false;
-
-        // Check Min
-        if (pos.x < min.x) min.x = pos.x;
-        if (pos.y < min.y) min.y = pos.y;
-        if (pos.z < min.z) min.z = pos.z;
-
-        // Check Max
-        if (pos.x > max.x) max.x = pos.x;
-        if (pos.y > max.y) max.y = pos.y;
-        if (pos.z > max.z) max.z = pos.z;
-
-        return true;
+    private boolean projectBounds(AABB box, double x, double y, double z) {
+        bounds.reset();
+        for (int corner = 0; corner < 8; corner++) {
+            pos.set(
+                ((corner & 1) == 0 ? box.minX : box.maxX) + x,
+                ((corner & 2) == 0 ? box.minY : box.maxY) + y,
+                ((corner & 4) == 0 ? box.minZ : box.maxZ) + z
+            );
+            // Close entities crossing the camera plane are omitted instead of producing giant boxes.
+            if (!NametagUtils.to2D(pos, 1, false)) return false;
+            bounds.include(pos.x, pos.y, pos.z);
+        }
+        return bounds.clip(mc.getWindow().getWidth(), mc.getWindow().getHeight());
     }
 
     // Utils
 
     public boolean drawAsTarget(Entity entity) {
-        return highlightTarget.get() && mc.hitResult instanceof EntityHitResult hr && hr.getEntity() == entity;
+        if (!highlightTarget.get()) return false;
+        KillAura aura = Modules.get().get(KillAura.class);
+        return (aura.isActive() && aura.getTarget() == entity)
+            || (mc.hitResult instanceof EntityHitResult hr && hr.getEntity() == entity);
     }
 
     public boolean shouldSkip(Entity entity) {
-        if (drawAsTarget(entity)) return false;
-        if (!entities.get().contains(entity.getType())) return true;
+        if (!entity.isAlive() || entity.isRemoved()) return true;
+        if (!drawAsTarget(entity) && !entities.get().contains(entity.getType())) return true;
         if (entity == mc.player && ignoreSelf.get()) return true;
         if (entity == mc.getCameraEntity() && mc.options.getCameraType().isFirstPerson()) return true;
-        return !EntityUtils.isInRenderDistance(entity);
+        return !EntityUtils.isInRenderDistance(entity)
+            || PlayerUtils.squaredDistanceToCamera(entity.getX(), entity.getY(), entity.getZ()) > maxDistance.get() * maxDistance.get();
     }
 
     public boolean shouldSkip(EntityType<?> entityType) {
@@ -385,16 +440,15 @@ public class ESP extends Module {
     }
 
     public Color getColor(Entity entity) {
+        if (shouldSkip(entity)) return null;
         Color color;
-        double alpha = 1;
+        double alpha = getFadeAlpha(entity);
+        if (alpha == 0) return null;
 
         if (drawAsTarget(entity)) {
             color = targetColor.get();
         } else {
             if (!entities.get().contains(entity.getType())) return null;
-
-            alpha = getFadeAlpha(entity);
-            if (alpha == 0) return null;
 
             color = getEntityTypeColor(entity);
         }
@@ -459,7 +513,58 @@ public class ESP extends Module {
         }
     }
 
+    private boolean isScreenMode() {
+        return mode.get() == Mode._2D || mode.get() == Mode.Telemetry;
+    }
+
+    private void drawSignature(Render3DEvent event, Entity entity) {
+        Renderer3D renderer = throughWalls.get() ? event.renderer : event.depthRenderer;
+        Color color = getColor(entity);
+        if (color == null) return;
+        Color accent = new Color(signatureAccent.get()).a((int) (signatureAccent.get().a * getFadeAlpha(entity)));
+        double x = Mth.lerp(event.tickDelta, entity.xOld, entity.getX());
+        double y = Mth.lerp(event.tickDelta, entity.yOld, entity.getY());
+        double z = Mth.lerp(event.tickDelta, entity.zOld, entity.getZ());
+        double radius = entity.getBbWidth() * 0.7 + 0.15, height = entity.getBbHeight();
+        double phase = animate.get() ? (entity.tickCount + event.tickDelta) * 0.045 : 0;
+        if (groundMarker.get()) for (int i = 0; i < 4; i++)
+            VisualGeometry.ring(renderer, x, y + 0.025, z, radius + 0.12, phase + i * Math.PI / 2, 1.1, detail.get() / 4, color);
+        if (mode.get() == Mode.Hologram) {
+            double scan = y + height * (0.5 + 0.48 * Math.sin(phase));
+            VisualGeometry.ring(renderer, x, scan, z, radius, 0, Math.PI * 2, detail.get(), accent);
+            VisualGeometry.band(renderer, x, scan, z, radius, -Math.min(0.45, height * 0.3), detail.get(),
+                new Color(accent).a((int) (accent.a * fillOpacity.get())));
+            for (int i = 0; i < 4; i++) {
+                double a = Math.PI / 4 + i * Math.PI / 2;
+                double px = x + Math.cos(a) * radius, pz = z + Math.sin(a) * radius;
+                renderer.line(px, y, pz, px, y + height, pz, new Color(color).a(color.a / 3));
+                renderer.line(px, y + height, pz, x + Math.cos(a) * radius * 0.6, y + height + 0.12, z + Math.sin(a) * radius * 0.6, color);
+            }
+        } else {
+            for (int strand = 0; strand < 2; strand++) {
+                for (int i = 0; i < detail.get(); i++) {
+                    double t = (double) i / detail.get(), next = (double) (i + 1) / detail.get();
+                    double a = phase + t * Math.PI * 2 + strand * Math.PI;
+                    double b = phase + next * Math.PI * 2 + strand * Math.PI;
+                    double px = x + Math.cos(a) * radius, py = y + t * height, pz = z + Math.sin(a) * radius;
+                    renderer.line(px, py, pz, x + Math.cos(b) * radius, y + next * height, z + Math.sin(b) * radius, strand == 0 ? color : accent);
+                    if (i % 4 == 0) {
+                        renderer.line(px - 0.04, py, pz, px + 0.04, py, pz, accent);
+                        renderer.line(px, py - 0.04, pz, px, py + 0.04, pz, accent);
+                    }
+                }
+            }
+        }
+        KillAura aura = Modules.get().get(KillAura.class);
+        if (tether.get() && aura.isActive() && aura.getTarget() == entity)
+            renderer.line(Mth.lerp(event.tickDelta, mc.player.xOld, mc.player.getX()), Mth.lerp(event.tickDelta, mc.player.yOld, mc.player.getY()) + 0.1,
+                Mth.lerp(event.tickDelta, mc.player.zOld, mc.player.getZ()), x, y + 0.1, z, accent);
+    }
+
     public enum Mode {
+        Hologram,
+        Constellation,
+        Telemetry,
         Box,
         Wireframe,
         _2D,

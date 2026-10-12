@@ -316,7 +316,7 @@ public class InventoryTweaks extends Module {
 
         if (!mc.player.containerMenu.getCarried().isEmpty()) {
             FindItemResult empty = InvUtils.findEmpty();
-            if (!empty.found()) InvUtils.click().slot(-999);
+            if (!empty.found()) InvUtils.click().slotId(AbstractContainerMenu.SLOT_CLICKED_OUTSIDE);
             else InvUtils.click().slot(empty.slot());
         }
 

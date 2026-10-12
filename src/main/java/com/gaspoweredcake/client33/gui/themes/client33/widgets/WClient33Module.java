@@ -43,7 +43,7 @@ public class WClient33Module extends WPressable implements Client33Widget {
 
     @Override
     public double pad() {
-        return theme.scale(4);
+        return theme.scale(7);
     }
 
     @Override
@@ -52,7 +52,7 @@ public class WClient33Module extends WPressable implements Client33Widget {
 
         if (titleWidth == 0) titleWidth = theme.textWidth(title);
 
-        width = pad + titleWidth + pad;
+        width = pad + titleWidth + theme.textWidth("OFF") + pad * 3;
         height = pad + theme.textHeight() + pad;
     }
 
@@ -80,12 +80,13 @@ public class WClient33Module extends WPressable implements Client33Widget {
             renderer.quad(x, y + height * (1 - animationProgress2), theme.scale(2), height * animationProgress2, theme.accentColor.get());
         }
         renderer.quad(x, y + height - theme.scale(1), width, theme.scale(1), theme.separatorEdges.get());
-        double indicator = theme.scale(2);
-        renderer.quad(x + width - theme.scale(3), y + height / 2 - indicator / 2, indicator, indicator,
-            module.isActive() ? theme.accentColor.get() : theme.outlineColor.get());
+        String status = module.isActive() ? "ON" : "OFF";
+        double statusWidth = theme.textWidth("OFF");
+        renderer.text(status, x + width - pad - statusWidth, y + pad,
+            module.isActive() ? theme.accentColor.get() : theme.textSecondaryColor.get(), false);
 
         double x = this.x + pad;
-        double w = width - pad * 2;
+        double w = width - pad * 3 - statusWidth;
 
         if (theme.moduleAlignment.get() == AlignmentX.Center) {
             x += w / 2 - titleWidth / 2;
