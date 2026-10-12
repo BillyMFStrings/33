@@ -71,16 +71,8 @@ public abstract class Setting<T> implements IGetter<T>, ISerializable<T> {
     }
 
     public boolean parse(String str) {
-        T newValue = parseImpl(str);
-
-        if (newValue != null) {
-            if (isValueValid(newValue)) {
-                value = newValue;
-                onChanged();
-            }
-        }
-
-        return newValue != null;
+        T parsed = parseImpl(str);
+        return parsed != null && set(parsed);
     }
 
     public boolean wasChanged() {
@@ -155,10 +147,8 @@ public abstract class Setting<T> implements IGetter<T>, ISerializable<T> {
     public static <T> T parseId(Registry<T> registry, String name) {
         name = name.trim();
 
-        Identifier id;
-        if (name.contains(":")) id = Identifier.parse(name);
-        else id = Identifier.withDefaultNamespace(name);
-        if (registry.containsKey(id)) return registry.getValue(id);
+        Identifier id = Identifier.tryParse(name);
+        if (id != null && registry.containsKey(id)) return registry.getValue(id);
 
         return null;
     }

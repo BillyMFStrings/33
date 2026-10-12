@@ -12,8 +12,8 @@ import com.gaspoweredcake.client33.gui.widgets.containers.WWindow;
 import com.gaspoweredcake.client33.utils.render.color.Color;
 
 public class WClient33Window extends WWindow implements Client33Widget {
-    private static final Color HEADER_START = new Color(17, 41, 34, 250);
-    private static final Color HEADER_END = new Color(7, 20, 22, 250);
+    private static final Color HEADER_START = new Color(190, 34, 49, 255);
+    private static final Color HEADER_END = new Color(116, 24, 40, 255);
 
     public WClient33Window(WWidget icon, String title) {
         super(icon, title);

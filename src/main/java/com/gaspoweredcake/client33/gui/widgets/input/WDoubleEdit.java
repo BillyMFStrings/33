@@ -52,7 +52,7 @@ public class WDoubleEdit extends WHorizontalList {
 
             switch (textBox.get()) {
                 case "", ".", "-." -> value = 0;
-                case "-" -> value = -0;
+                case "-" -> value = -0.0;
                 default -> {
                     try {
                         value = Double.parseDouble(textBox.get());
@@ -61,6 +61,10 @@ public class WDoubleEdit extends WHorizontalList {
                 }
             }
 
+            if (!Double.isFinite(value)) {
+                value = lastValue;
+                textBox.set(valueString());
+            }
             double preValidationValue = value;
 
             if (value < min) value = min;

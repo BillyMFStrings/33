@@ -78,7 +78,7 @@ public class SettingGroup implements ISerializable<SettingGroup>, Iterable<Setti
 
         ListTag settingsTag = tag.getListOrEmpty("settings");
         for (Tag t : settingsTag) {
-            CompoundTag settingTag = (CompoundTag) t;
+            if (!(t instanceof CompoundTag settingTag)) continue;
 
             Setting<?> setting = get(settingTag.getStringOr("name", ""));
             if (setting != null) setting.fromTag(settingTag);

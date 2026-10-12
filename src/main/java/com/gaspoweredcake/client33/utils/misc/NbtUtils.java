@@ -16,6 +16,8 @@ import org.jspecify.annotations.Nullable;
 import static com.gaspoweredcake.client33.Client33.mc;
 
 public class NbtUtils {
+    private static final int MAX_CLIPBOARD_CHARS = 8 * 1024 * 1024;
+    private static final long MAX_CLIPBOARD_NBT_BYTES = 16L * 1024 * 1024;
     public static <T extends ISerializable<?>> ListTag listToTag(Iterable<T> list) {
         ListTag tag = new ListTag();
         for (T item : list) tag.add(item.toTag());
@@ -76,9 +78,11 @@ public class NbtUtils {
 
     public static @Nullable CompoundTag fromClipboard() {
         try {
-            byte[] data = Base64.getDecoder().decode(mc.keyboardHandler.getClipboard().trim());
+            String encoded = mc.keyboardHandler.getClipboard().trim();
+            if (encoded.length() > MAX_CLIPBOARD_CHARS) throw new IllegalArgumentException("Clipboard NBT exceeds size limit");
+            byte[] data = Base64.getDecoder().decode(encoded);
             var bis = new FastByteArrayInputStream(data);
-            return NbtIo.readCompressed(bis, NbtAccounter.unlimitedHeap());
+            return NbtIo.readCompressed(bis, NbtAccounter.create(MAX_CLIPBOARD_NBT_BYTES));
         } catch (Exception e) {
             Client33.LOG.error("Invalid NBT data pasted!", e);
             return null;

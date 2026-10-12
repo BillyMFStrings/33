@@ -15,6 +15,7 @@ import com.gaspoweredcake.client33.gui.renderer.GuiRenderer;
 import com.gaspoweredcake.client33.gui.utils.Cell;
 import com.gaspoweredcake.client33.gui.widgets.WKeybind;
 import com.gaspoweredcake.client33.gui.widgets.WWidget;
+import com.gaspoweredcake.client33.gui.widgets.input.WTextBox;
 import com.gaspoweredcake.client33.gui.widgets.containers.WContainer;
 import com.gaspoweredcake.client33.gui.widgets.containers.WHorizontalList;
 import com.gaspoweredcake.client33.gui.widgets.containers.WSection;
@@ -38,9 +39,11 @@ public class ModuleScreen extends WindowScreen {
     private WContainer settingsContainer;
     private WKeybind keybind;
     private WCheckbox active;
+    private String settingsQuery = "";
 
     public ModuleScreen(GuiTheme theme, Module module) {
         super(theme, theme.favorite(module.favorite), module.title);
+        windowCell.top().marginTop(42);
         ((WFavorite) window.icon).action = () -> module.favorite = ((WFavorite) window.icon).checked;
 
         this.module = module;
@@ -57,10 +60,23 @@ public class ModuleScreen extends WindowScreen {
             addon.add(theme.label(module.addon.name).color(module.addon.color)).widget();
         }
 
-        // Settings
+        WHorizontalList controls = add(theme.horizontalList()).expandX().widget();
+        controls.add(theme.label("Enabled"));
+        active = controls.add(theme.checkbox(module.isActive())).widget();
+        active.action = () -> {
+            if (module.isActive() != active.checked) module.toggle();
+        };
+        controls.add(theme.button("Back to modules")).expandCellX().right().widget().action = this::onClose;
+
         if (!module.settings.groups.isEmpty()) {
+            WTextBox search = add(theme.textBox(settingsQuery, "Find a setting...")).expandX().widget();
             settingsContainer = add(theme.verticalList()).expandX().widget();
-            settingsContainer.add(theme.settings(module.settings)).expandX();
+            settingsContainer.add(theme.settings(module.settings, settingsQuery)).expandX();
+            search.action = () -> {
+                settingsQuery = search.get();
+                settingsContainer.clear();
+                settingsContainer.add(theme.settings(module.settings, settingsQuery)).expandX();
+            };
         }
 
         // Custom widget
@@ -73,7 +89,7 @@ public class ModuleScreen extends WindowScreen {
         }
 
         // Bind
-        WSection section = add(theme.section("Bind", true)).expandX().widget();
+        WSection section = add(theme.section("Keybind & feedback", false)).expandX().widget();
 
         // Keybind
         WHorizontalList bind = section.add(theme.horizontalList()).expandX().widget();
@@ -105,13 +121,6 @@ public class ModuleScreen extends WindowScreen {
         // Bottom
         WHorizontalList bottom = add(theme.horizontalList()).expandX().widget();
 
-        // Active
-        bottom.add(theme.label("Active: "));
-        active = bottom.add(theme.checkbox(module.isActive())).expandCellX().widget();
-        active.action = () -> {
-            if (module.isActive() != active.checked) module.toggle();
-        };
-
         // Config sharing
         WHorizontalList sharing = bottom.add(theme.horizontalList()).right().widget();
         WButton copy = sharing.add(theme.button(GuiRenderer.COPY)).widget();
@@ -142,7 +151,7 @@ public class ModuleScreen extends WindowScreen {
     public void tick() {
         super.tick();
 
-        module.settings.tick(settingsContainer, theme);
+        module.settings.tick(settingsContainer, theme, settingsQuery);
     }
 
     @EventHandler

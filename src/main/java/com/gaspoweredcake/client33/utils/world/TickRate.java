@@ -7,65 +7,28 @@ package com.gaspoweredcake.client33.utils.world;
 
 import com.gaspoweredcake.client33.Client33;
 import com.gaspoweredcake.client33.events.game.GameJoinedEvent;
-import com.gaspoweredcake.client33.events.packets.PacketEvent;
 import com.gaspoweredcake.client33.utils.Utils;
+import com.gaspoweredcake.client33.utils.combat.CombatTelemetry;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
-import net.minecraft.util.Mth;
 
-import java.util.Arrays;
+/** Compatibility facade over the shared monotonic server-tick model. */
+public final class TickRate {
+    public static final TickRate INSTANCE = new TickRate();
+    private volatile long joinedAt = CombatTelemetry.now();
 
-/**
- * Copied from <a href="https://github.com/S-B99/kamiblue/blob/feature/master/src/main/java/me/zeroeightsix/kami/util/LagCompensator.java">KAMI Blue</a>
- */
-public class TickRate {
-    public static TickRate INSTANCE = new TickRate();
+    private TickRate() { Client33.EVENT_BUS.subscribe(this); }
 
-    private final float[] tickRates = new float[20];
-    private int nextIndex = 0;
-    private long timeLastTimeUpdate = -1;
-    private long timeGameJoined;
-
-    private TickRate() {
-        Client33.EVENT_BUS.subscribe(this);
-    }
-
-    @EventHandler
-    private void onReceivePacket(PacketEvent.Receive event) {
-        if (event.packet instanceof ClientboundSetTimePacket) {
-            long now = System.currentTimeMillis();
-            float timeElapsed = (now - timeLastTimeUpdate) / 1000.0F;
-            tickRates[nextIndex] = Mth.clamp(20.0f / timeElapsed, 0.0f, 20.0f);
-            nextIndex = (nextIndex + 1) % tickRates.length;
-            timeLastTimeUpdate = now;
-        }
-    }
-
-    @EventHandler
-    private void onGameJoined(GameJoinedEvent event) {
-        Arrays.fill(tickRates, 0);
-        nextIndex = 0;
-        timeGameJoined = timeLastTimeUpdate = System.currentTimeMillis();
-    }
+    @EventHandler private void onJoin(GameJoinedEvent event) { joinedAt = CombatTelemetry.now(); }
 
     public float getTickRate() {
-        if (!Utils.canUpdate()) return 0;
-        if (System.currentTimeMillis() - timeGameJoined < 4000) return 20;
-
-        int numTicks = 0;
-        float sumTickRates = 0.0f;
-        for (float tickRate : tickRates) {
-            if (tickRate > 0) {
-                sumTickRates += tickRate;
-                numTicks++;
-            }
-        }
-        return sumTickRates / numTicks;
+        return Utils.canUpdate() ? (float) (1000 / CombatTelemetry.CLOCK.tickMillis()) : 0;
     }
 
     public float getTimeSinceLastTick() {
-        long now = System.currentTimeMillis();
-        if (now - timeGameJoined < 4000) return 0;
-        return (now - timeLastTimeUpdate) / 1000f;
+        if (!Utils.canUpdate()) return 0;
+        long now = CombatTelemetry.now();
+        long connected = Math.max(0, now - joinedAt);
+        if (connected < 4000) return 0;
+        return Math.min(connected, CombatTelemetry.CLOCK.ageMillis(now)) / 1000f;
     }
 }

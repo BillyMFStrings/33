@@ -134,6 +134,7 @@ public class DefaultSettingsWidgetFactory extends SettingsWidgetFactory {
         }
 
         if (removeInfo != null) removeInfoList.add(removeInfo);
+        if (table.cells.isEmpty()) list.cells.removeIf(cell -> cell.widget() == section);
     }
 
     private static class RemoveInfo {

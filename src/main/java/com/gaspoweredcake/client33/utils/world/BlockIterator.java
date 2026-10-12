@@ -5,106 +5,51 @@
 
 package com.gaspoweredcake.client33.utils.world;
 
-import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
 import com.gaspoweredcake.client33.Client33;
+import com.gaspoweredcake.client33.events.game.GameLeftEvent;
 import com.gaspoweredcake.client33.events.world.TickEvent;
 import com.gaspoweredcake.client33.utils.PreInit;
 import com.gaspoweredcake.client33.utils.Utils;
-import com.gaspoweredcake.client33.utils.misc.Pool;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
-
-import java.util.List;
 import java.util.function.BiConsumer;
-
 import static com.gaspoweredcake.client33.Client33.mc;
 
-public class BlockIterator {
-    private static final Pool<Callback> callbackPool = new Pool<>(Callback::new);
-    private static final List<Callback> callbacks = new ReferenceArrayList<>();
-
-    private static final List<Runnable> afterCallbacks = new ReferenceArrayList<>();
-
-    private static final BlockPos.MutableBlockPos blockPos = new BlockPos.MutableBlockPos();
-    private static int hRadius, vRadius;
-
+/** Shared, same-tick scan adapter. Callback positions are borrowed and must not be retained. */
+public final class BlockIterator {
+    private static final BlockScanBatch<BlockState> scans = new BlockScanBatch<>(failure ->
+        Client33.LOG.error("Block scan callback failed and was removed from the current batch.", failure));
+    private static final BlockPos.MutableBlockPos position = new BlockPos.MutableBlockPos();
+    private static Object world;
     private static boolean disableCurrent;
 
-    private BlockIterator() {
-    }
+    private BlockIterator() {}
+    @PreInit public static void init() { Client33.EVENT_BUS.subscribe(BlockIterator.class); }
 
-    @PreInit
-    public static void init() {
-        Client33.EVENT_BUS.subscribe(BlockIterator.class);
+    private static void alignWorld() {
+        if (world != mc.level) { scans.clear(); world = mc.level; }
     }
+    @EventHandler private static void onLeave(GameLeftEvent event) { scans.clear(); world = null; }
 
     @EventHandler(priority = EventPriority.LOWEST - 1)
     private static void onTick(TickEvent.Pre event) {
-        if (!Utils.canUpdate()) return;
-
-        int px = mc.player.getBlockX();
-        int py = mc.player.getBlockY();
-        int pz = mc.player.getBlockZ();
-
-        for (int x = px - hRadius; x <= px + hRadius; x++) {
-            for (int z = pz - hRadius; z <= pz + hRadius; z++) {
-                for (int y = Math.max(mc.level.getMinY(), py - vRadius); y <= py + vRadius; y++) {
-                    if (y > mc.level.getHeight()) break;
-
-                    blockPos.set(x, y, z);
-                    BlockState blockState = mc.level.getBlockState(blockPos);
-
-                    int dx = Math.abs(x - px);
-                    int dy = Math.abs(y - py);
-                    int dz = Math.abs(z - pz);
-
-                    callbacks.removeIf(callback -> {
-                        if (dx <= callback.hRadius && dy <= callback.vRadius && dz <= callback.hRadius) {
-                            disableCurrent = false;
-                            callback.function.accept(blockPos, blockState);
-                            return disableCurrent;
-                        }
-                        return false;
-                    });
-                }
-            }
-        }
-
-        hRadius = 0;
-        vRadius = 0;
-
-        callbackPool.freeAll(callbacks);
-        callbacks.clear();
-
-        for (Runnable callback : afterCallbacks) callback.run();
-        afterCallbacks.clear();
+        alignWorld();
+        if (!Utils.canUpdate()) { scans.clear(); return; }
+        var level = mc.level;
+        scans.run(mc.player.getBlockX(), mc.player.getBlockY(), mc.player.getBlockZ(),
+            level.getMinY(), level.getMinY() + level.getHeight(), (x, y, z) -> level.getBlockState(position.set(x, y, z)));
     }
 
     public static void register(int horizontalRadius, int verticalRadius, BiConsumer<BlockPos, BlockState> function) {
-        hRadius = Math.max(hRadius, horizontalRadius);
-        vRadius = Math.max(vRadius, verticalRadius);
-
-        Callback callback = callbackPool.get();
-
-        callback.function = function;
-        callback.hRadius = horizontalRadius;
-        callback.vRadius = verticalRadius;
-
-        callbacks.add(callback);
+        alignWorld();
+        scans.register(horizontalRadius, verticalRadius, (x, y, z, state) -> {
+            disableCurrent = false;
+            function.accept(position.set(x, y, z), state);
+            return !disableCurrent;
+        });
     }
-
-    public static void disableCurrent() {
-        disableCurrent = true;
-    }
-
-    public static void after(Runnable callback) {
-        afterCallbacks.add(callback);
-    }
-
-    private static class Callback {
-        public BiConsumer<BlockPos, BlockState> function;
-        public int hRadius, vRadius;
-    }
+    public static void disableCurrent() { disableCurrent = true; }
+    public static void after(Runnable callback) { alignWorld(); scans.after(callback); }
 }

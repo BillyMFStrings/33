@@ -39,7 +39,7 @@ public class DoubleSetting extends Setting<Double> {
 
     @Override
     protected boolean isValueValid(Double value) {
-        return value >= min && value <= max;
+        return value != null && Double.isFinite(value) && value >= min && value <= max;
     }
 
     @Override

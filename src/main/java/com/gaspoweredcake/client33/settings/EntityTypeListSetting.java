@@ -48,7 +48,7 @@ public class EntityTypeListSetting extends Setting<Set<EntityType<?>>> {
                 EntityType<?> entity = parseId(BuiltInRegistries.ENTITY_TYPE, value);
                 if (entity != null) entities.add(entity);
                 else {
-                    String lowerValue = value.trim().toLowerCase();
+                    String lowerValue = value.trim().toLowerCase(java.util.Locale.ROOT);
                     if (!groups.contains(lowerValue)) continue;
 
                     for (EntityType<?> entityType : BuiltInRegistries.ENTITY_TYPE) {

@@ -44,7 +44,7 @@ public class TitleScreenCredits {
         // Check for latest commits
         Client33Executor.execute(() -> {
             for (Credit credit : credits) {
-                if (credit.addon.getRepo() == null || credit.addon.getCommit() == null) continue;
+                if (credit.addon == Client33.ADDON || credit.addon.getRepo() == null || credit.addon.getCommit() == null) continue;
 
                 GithubRepo repo = credit.addon.getRepo();
                 Http.Request request = Http.get("https://api.github.com/repos/%s/branches/%s".formatted(repo.getOwnerName(), repo.branch()));
@@ -83,6 +83,12 @@ public class TitleScreenCredits {
 
     private static void add(Client33Addon addon) {
         Credit credit = new Credit(addon);
+
+        if (addon == Client33.ADDON) {
+            credit.text.append(Component.literal("33").withStyle(style -> style.withColor(addon.color.getPacked())));
+            credits.add(credit);
+            return;
+        }
 
         credit.text.append(Component.literal(addon.name).withStyle(style -> style.withColor(addon.color.getPacked())));
         credit.text.append(Component.literal(" by ").withStyle(ChatFormatting.GRAY));

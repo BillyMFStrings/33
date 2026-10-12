@@ -130,6 +130,9 @@ public abstract class WidgetScreen extends Screen {
         mouseX *= s;
         mouseY *= s;
 
+        // Opening or rebuilding a screen can leave hover state stale without pointer motion.
+        root.mouseMoved(mouseX, mouseY, lastMouseX, lastMouseY);
+
         // Unfocus all text boxes that are not under the mouse cursor
         loopWidgets(root, widget -> {
             if (widget instanceof WTextBox textBox && textBox.isFocused() && !textBox.mouseOver) {
@@ -175,6 +178,8 @@ public abstract class WidgetScreen extends Screen {
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         if (locked) return false;
 
+        double scale = mc.getWindow().getGuiScale();
+        root.mouseMoved(mouseX * scale, mouseY * scale, mouseX * scale, mouseY * scale);
         root.mouseScrolled(verticalAmount);
 
         return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);

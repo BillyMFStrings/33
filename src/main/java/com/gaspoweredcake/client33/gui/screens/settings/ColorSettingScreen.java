@@ -410,7 +410,7 @@ public class ColorSettingScreen extends WindowScreen {
 
     private SettingColor parseHex(String string) {
         if (!string.startsWith("#")) return null;
-        String hex = string.toLowerCase().replaceAll("[^0-9a-f]", "");
+        String hex = string.toLowerCase(java.util.Locale.ROOT).replaceAll("[^0-9a-f]", "");
         if (hex.length() != 6 && hex.length() != 8) return null;
 
         SettingColor color;

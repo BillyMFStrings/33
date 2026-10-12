@@ -194,6 +194,10 @@ public class AutoGap extends Module {
     }
 
     private void startEating() {
+        Modules.get().get(AutoEat.class).stopEating();
+        // AutoEat may have restored a borrowed hotbar slot during the handoff.
+        slot = findSlot();
+        if (slot == -1) return;
         prevSlot = mc.player.getInventory().getSelectedSlot();
         eat();
 

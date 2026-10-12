@@ -20,8 +20,6 @@ public class MeshUniforms {
         .putMat4f()
         .get();
 
-    private static final Data DATA = new Data();
-
     private static final DynamicUniformStorage<Data> STORAGE = new DynamicUniformStorage<>("Client33 - Mesh UBO", SIZE, 16);
 
     public static void flipFrame() {
@@ -29,26 +27,16 @@ public class MeshUniforms {
     }
 
     public static GpuBufferSlice write(Matrix4f proj, Matrix4f modelView) {
-        DATA.proj = proj;
-        DATA.modelView = modelView;
-
-        return STORAGE.writeUniform(DATA);
+        // Uniform storage may retain its input for reuse: never hand it a mutated singleton.
+        return STORAGE.writeUniform(new Data(new Matrix4f(proj), new Matrix4f(modelView)));
     }
 
-    private static final class Data implements DynamicUniformStorage.DynamicUniform {
-        private Matrix4f proj;
-        private Matrix4f modelView;
-
+    private record Data(Matrix4f proj, Matrix4f modelView) implements DynamicUniformStorage.DynamicUniform {
         @Override
         public void write(@NonNull ByteBuffer buffer) {
             Std140Builder.intoBuffer(buffer)
                 .putMat4f(proj)
                 .putMat4f(modelView);
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            return false;
         }
     }
 }

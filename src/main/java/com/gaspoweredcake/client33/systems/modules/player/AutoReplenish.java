@@ -14,6 +14,7 @@ import com.gaspoweredcake.client33.systems.modules.combat.AutoTotem;
 import com.gaspoweredcake.client33.utils.player.InvUtils;
 import com.gaspoweredcake.client33.utils.player.SlotUtils;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
@@ -79,7 +80,7 @@ public class AutoReplenish extends Module {
      * hotbar from left to right, index 9 represents the player's offhand
      */
     private final ItemStack[] items = new ItemStack[10];
-    private boolean prevHadOpenScreen;
+    private boolean prevHadInventoryScreen;
     private int tickDelayLeft;
 
     public AutoReplenish() {
@@ -90,17 +91,17 @@ public class AutoReplenish extends Module {
     public void onActivate() {
         fillItems();
         tickDelayLeft = tickDelay.get();
-        prevHadOpenScreen = mc.gui.screen() != null;
+        prevHadInventoryScreen = mc.gui.screen() instanceof AbstractContainerScreen<?>;
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.gui.screen() == null && prevHadOpenScreen) {
+        if (!(mc.gui.screen() instanceof AbstractContainerScreen<?>) && prevHadInventoryScreen) {
             fillItems();
         }
 
-        prevHadOpenScreen = mc.gui.screen() != null;
-        if (mc.player.containerMenu.getItems().size() != 46 || mc.gui.screen() != null) return;
+        prevHadInventoryScreen = mc.gui.screen() instanceof AbstractContainerScreen<?>;
+        if (mc.player.containerMenu != mc.player.inventoryMenu || !mc.player.containerMenu.getCarried().isEmpty() || mc.gui.screen() != null) return;
 
         if (tickDelayLeft > 0) {
             tickDelayLeft--;
@@ -124,7 +125,7 @@ public class AutoReplenish extends Module {
 
     private void checkSlot(int slot, ItemStack stack) {
         ItemStack prevStack = items[slot];
-        items[slot] = stack.copy();
+        if (!stack.isEmpty()) items[slot] = stack.copy();
 
         if (slot == 9) slot = SlotUtils.OFFHAND;
 
@@ -150,6 +151,8 @@ public class AutoReplenish extends Module {
             fromSlot = findItem(prevStack, slot, 1, false);
         }
 
+        if (fromSlot < 0) return;
+
         // eliminate occasional loops when moving items from hotbar to itself
         if (fromSlot == mc.player.getInventory().getSelectedSlot() || fromSlot == SlotUtils.OFFHAND) return;
         if (fromSlot < 9 && fromSlot < slot && slot != mc.player.getInventory().getSelectedSlot() && slot != SlotUtils.OFFHAND)
@@ -162,7 +165,7 @@ public class AutoReplenish extends Module {
         int slot = -1;
         int count = 0;
 
-        for (int i = mc.player.getInventory().getContainerSize() - 2; i >= (searchHotbar.get() ? 0 : 9); i--) {
+        for (int i = mc.player.getInventory().getNonEquipmentItems().size() - 1; i >= (searchHotbar.get() ? 0 : 9); i--) {
             if (i == excludedSlot) continue;
 
             ItemStack stack = mc.player.getInventory().getItem(i);

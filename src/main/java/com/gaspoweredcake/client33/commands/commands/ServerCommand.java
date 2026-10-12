@@ -243,7 +243,7 @@ public class ServerCommand extends Command {
 
                 for (Suggestion suggestion : matches.getList()) {
                     String pluginName = suggestion.getText();
-                    if (!plugins.contains(pluginName.toLowerCase())) plugins.add(pluginName);
+                    if (!plugins.contains(pluginName.toLowerCase(java.util.Locale.ROOT))) plugins.add(pluginName);
                 }
 
                 printPlugins();
@@ -254,7 +254,7 @@ public class ServerCommand extends Command {
     }
 
     private String formatName(String name) {
-        if (ANTICHEAT_LIST.contains(name.toLowerCase())) {
+        if (ANTICHEAT_LIST.contains(name.toLowerCase(java.util.Locale.ROOT))) {
             return String.format("%s%s(default)", ChatFormatting.RED, name);
         } else if (Strings.CI.contains(name, "exploit") || Strings.CI.contains(name, "cheat") || Strings.CI.contains(name, "illegal")) {
             return String.format("%s%s(default)", ChatFormatting.RED, name);

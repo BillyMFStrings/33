@@ -2,19 +2,20 @@
  * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
  * Copyright (c) Meteor Development.
  */
-
 package com.gaspoweredcake.client33.utils.player;
 
-import com.mojang.datafixers.util.Pair;
-import com.gaspoweredcake.client33.mixininterface.ISlot;
 import com.gaspoweredcake.client33.utils.render.PeekScreen;
+import com.gaspoweredcake.client33.mixin.AbstractContainerScreenAccessor;
+import com.gaspoweredcake.client33.mixin.CreativeModeInventoryScreenAccessor;
+import com.gaspoweredcake.client33.mixin.CreativeModeTabsAccessor;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.client.gui.screens.inventory.ShulkerBoxScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 
@@ -22,208 +23,108 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-public class InventorySorter {
+import static com.gaspoweredcake.client33.Client33.mc;
+
+/** Plans against copied component-bearing stacks, aborting if the screen or affected slots change. */
+public final class InventorySorter {
+    private record Action(int from, int to, Slot fromView, Slot toView, ItemStack expectedFrom, ItemStack expectedTo) {}
+    private static final class PlannedSlot {
+        final int id;
+        ItemStack stack;
+        PlannedSlot(int id, Slot slot) { this.id = id; stack = slot.getItem().copy(); }
+    }
     private final AbstractContainerScreen<?> screen;
-    private final InvPart originInvPart;
-
+    private final AbstractContainerMenu menu;
+    private final List<Action> actions = new ArrayList<>();
+    private int next, ticks;
     private boolean invalid;
-    private List<Action> actions;
-    private int timer, currentActionI;
 
-    public InventorySorter(AbstractContainerScreen<?> screen, Slot originSlot) {
+    public InventorySorter(AbstractContainerScreen<?> screen, Slot origin) {
         this.screen = screen;
-
-        this.originInvPart = getInvPart(originSlot);
-        if (originInvPart == InvPart.Invalid || originInvPart == InvPart.Hotbar || screen instanceof PeekScreen) {
-            invalid = true;
-            return;
+        menu = screen.getMenu();
+        if (mc.player == null || menu != mc.player.containerMenu || screen instanceof PeekScreen
+            || !compatibleScreen() || !menu.getCarried().isEmpty() || !origin.isActive()) { invalid = true; return; }
+        boolean playerInventory = origin.container == mc.player.getInventory();
+        if ((playerInventory && !SlotUtils.isMain(origin.getContainerSlot()))
+            || (!playerInventory && !(screen instanceof ContainerScreen || screen instanceof ShulkerBoxScreen))) { invalid = true; return; }
+        List<PlannedSlot> slots = new ArrayList<>();
+        for (int id = 0; id < menu.slots.size(); id++) {
+            Slot slot = menu.slots.get(id);
+            if (!slot.isActive() || !slot.mayPickup(mc.player)) continue;
+            boolean samePart = playerInventory ? slot.container == mc.player.getInventory() && SlotUtils.isMain(slot.getContainerSlot())
+                : slot.container == origin.container && !(slot.container instanceof Inventory);
+            if (samePart) slots.add(new PlannedSlot(id, slot));
         }
-
-        this.actions = new ArrayList<>();
-        generateActions();
+        if (slots.size() > 108) { invalid = true; return; }
+        slots.sort(Comparator.comparingInt(slot -> slot.id));
+        compact(slots);
+        order(slots);
     }
 
+    /** Returns true when complete or safely cancelled. */
     public boolean tick(int delay) {
-        if (invalid) return true;
-        if (currentActionI >= actions.size()) return true;
-
-        if (timer >= delay) {
-            timer = 0;
-        } else {
-            timer++;
-            return false;
-        }
-
-        Action action = actions.get(currentActionI);
-        InvUtils.move().fromId(action.from).toId(action.to);
-
-        currentActionI++;
-        return false;
+        if (invalid || next >= actions.size()) return true;
+        if (mc.player == null || mc.gui.screen() != screen || mc.player.containerMenu != menu || !compatibleScreen() || !menu.getCarried().isEmpty()) return true;
+        if (ticks++ < Math.max(0, delay)) return false;
+        ticks = 0;
+        Action action = actions.get(next);
+        Slot from = menu.getSlot(action.from), to = menu.getSlot(action.to);
+        if (from != action.fromView || to != action.toView || !from.isActive() || !to.isActive() || !from.mayPickup(mc.player) || !to.mayPickup(mc.player)
+            || !to.mayPlace(from.getItem()) || (!to.getItem().isEmpty() && !from.mayPlace(to.getItem()))
+            || !matches(from.getItem(), action.expectedFrom) || !matches(to.getItem(), action.expectedTo)) return true;
+        if (screen instanceof CreativeModeInventoryScreen) {
+            var clicks = (AbstractContainerScreenAccessor) screen;
+            clicks.client33$clickSlot(from, action.from, 0, ContainerInput.PICKUP);
+            clicks.client33$clickSlot(to, action.to, 0, ContainerInput.PICKUP);
+            if (!menu.getCarried().isEmpty()) clicks.client33$clickSlot(from, action.from, 0, ContainerInput.PICKUP);
+        } else InvUtils.move().fromId(action.from).toId(action.to);
+        next++;
+        return next >= actions.size();
     }
 
-    private void generateActions() {
-        // Find all slots and sort them
-        List<MySlot> slots = new ArrayList<>();
-
-        for (Slot slot : screen.getMenu().slots) {
-            if (getInvPart(slot) == originInvPart)
-                slots.add(new MySlot(((ISlot) slot).client33$getIndex(), slot.getItem()));
-        }
-
-        slots.sort(Comparator.comparingInt(value -> value.id));
-
-        // Generate actions
-        generateStackingActions(slots);
-        generateSortingActions(slots);
+    private boolean compatibleScreen() {
+        return !(screen instanceof CreativeModeInventoryScreen) || CreativeModeInventoryScreenAccessor.client33$getSelectedTab()
+            == BuiltInRegistries.CREATIVE_MODE_TAB.getValue(CreativeModeTabsAccessor.client33$getInventory());
     }
-
-    private void generateStackingActions(List<MySlot> slots) {
-        // Generate a map for slots that can be stacked
-        SlotMap slotMap = new SlotMap();
-
-        for (MySlot slot : slots) {
-            if (slot.itemStack.isEmpty() || !slot.itemStack.isStackable() || slot.itemStack.getCount() >= slot.itemStack.getMaxStackSize())
-                continue;
-
-            slotMap.get(slot.itemStack).add(slot);
-        }
-
-        // Stack previously found slots
-        for (var entry : slotMap.map) {
-            List<MySlot> slotsToStack = entry.getSecond();
-            MySlot slotToStackTo = null;
-
-            for (int i = 0; i < slotsToStack.size(); i++) {
-                MySlot slot = slotsToStack.get(i);
-
-                // Check if slotToStackTo is null and update it if it is
-                if (slotToStackTo == null) {
-                    slotToStackTo = slot;
-                    continue;
-                }
-
-                // Generate action
-                actions.add(new Action(slot.id, slotToStackTo.id));
-
-                // Handle state when the two stacks can combine without any leftovers
-                if (slotToStackTo.itemStack.getCount() + slot.itemStack.getCount() <= slotToStackTo.itemStack.getMaxStackSize()) {
-                    slotToStackTo.itemStack = new ItemStack(slotToStackTo.itemStack.getItem(), slotToStackTo.itemStack.getCount() + slot.itemStack.getCount());
-                    slot.itemStack = ItemStack.EMPTY;
-
-                    if (slotToStackTo.itemStack.getCount() >= slotToStackTo.itemStack.getMaxStackSize())
-                        slotToStackTo = null;
-                }
-                // Handle state when combining the two stacks produces leftovers
-                else {
-                    int needed = slotToStackTo.itemStack.getMaxStackSize() - slotToStackTo.itemStack.getCount();
-
-                    slotToStackTo.itemStack = new ItemStack(slotToStackTo.itemStack.getItem(), slotToStackTo.itemStack.getMaxStackSize());
-                    slot.itemStack = new ItemStack(slot.itemStack.getItem(), slot.itemStack.getCount() - needed);
-
-                    slotToStackTo = null;
-                    i--;
-                }
-            }
-        }
+    private static boolean matches(ItemStack actual, ItemStack expected) {
+        return actual.getCount() == expected.getCount() && ItemStack.isSameItemSameComponents(actual, expected);
     }
-
-    private void generateSortingActions(List<MySlot> slots) {
+    private void record(PlannedSlot from, PlannedSlot to) {
+        actions.add(new Action(from.id, to.id, menu.getSlot(from.id), menu.getSlot(to.id), from.stack.copy(), to.stack.copy()));
+    }
+    private void compact(List<PlannedSlot> slots) {
         for (int i = 0; i < slots.size(); i++) {
-            // Find best slot to move here
-            MySlot bestSlot = null;
-
-            for (int j = i; j < slots.size(); j++) {
-                MySlot slot = slots.get(j);
-
-                if (bestSlot == null) {
-                    bestSlot = slot;
-                    continue;
-                }
-
-                if (isSlotBetter(bestSlot, slot)) bestSlot = slot;
-            }
-
-            // Generate action
-            if (!bestSlot.itemStack.isEmpty()) {
-                MySlot toSlot = slots.get(i);
-
-                int from = bestSlot.id;
-                int to = toSlot.id;
-
-                if (from != to) {
-                    ItemStack temp = bestSlot.itemStack;
-                    bestSlot.itemStack = toSlot.itemStack;
-                    toSlot.itemStack = temp;
-
-                    actions.add(new Action(from, to));
-                }
+            PlannedSlot to = slots.get(i);
+            if (to.stack.isEmpty() || !to.stack.isStackable()) continue;
+            int capacity = Math.min(to.stack.getMaxStackSize(), menu.getSlot(to.id).getMaxStackSize(to.stack));
+            for (int j = i + 1; j < slots.size() && to.stack.getCount() < capacity; j++) {
+                PlannedSlot from = slots.get(j);
+                if (from.stack.isEmpty() || !ItemStack.isSameItemSameComponents(from.stack, to.stack)) continue;
+                record(from, to);
+                int moved = Math.min(from.stack.getCount(), capacity - to.stack.getCount());
+                to.stack = to.stack.copyWithCount(to.stack.getCount() + moved);
+                from.stack = from.stack.copyWithCount(from.stack.getCount() - moved);
             }
         }
     }
-
-    private boolean isSlotBetter(MySlot best, MySlot slot) {
-        ItemStack bestI = best.itemStack;
-        ItemStack slotI = slot.itemStack;
-
-        if (bestI.isEmpty() && !slotI.isEmpty()) return true;
-        else if (!bestI.isEmpty() && slotI.isEmpty()) return false;
-
-        int c = BuiltInRegistries.ITEM.getKey(bestI.getItem()).compareTo(BuiltInRegistries.ITEM.getKey(slotI.getItem()));
-        if (c == 0) {
-            if (slotI.getCount() != bestI.getCount()) return slotI.getCount() > bestI.getCount();
-            if (slotI.getDamageValue() != bestI.getDamageValue())
-                return slotI.getDamageValue() > bestI.getDamageValue();
-        }
-
-        return c > 0;
-    }
-
-    private InvPart getInvPart(Slot slot) {
-        int i = ((ISlot) slot).client33$getSlot();
-
-        if (slot.container instanceof Inventory && (!(screen instanceof CreativeModeInventoryScreen) || ((ISlot) slot).client33$getIndex() > 8)) {
-            if (SlotUtils.isHotbar(i)) return InvPart.Hotbar;
-            else if (SlotUtils.isMain(i)) return InvPart.Player;
-        } else if ((screen instanceof ContainerScreen || screen instanceof ShulkerBoxScreen) && slot.container instanceof SimpleContainer) {
-            return InvPart.Main;
-        }
-
-        return InvPart.Invalid;
-    }
-
-    private enum InvPart {
-        Hotbar,
-        Player,
-        Main,
-        Invalid
-    }
-
-    private static class MySlot {
-        public final int id;
-        public ItemStack itemStack;
-
-        public MySlot(int id, ItemStack itemStack) {
-            this.id = id;
-            this.itemStack = itemStack;
+    private void order(List<PlannedSlot> slots) {
+        for (int i = 0; i < slots.size(); i++) {
+            PlannedSlot destination = slots.get(i), best = destination;
+            for (int j = i + 1; j < slots.size(); j++) if (compare(slots.get(j).stack, best.stack) < 0) best = slots.get(j);
+            if (best == destination || best.stack.isEmpty()) continue;
+            // Container storage and main inventory accept ordinary stacks; preserve custom slot constraints too.
+            if (best.stack.getCount() > menu.getSlot(destination.id).getMaxStackSize(best.stack)
+                || (!destination.stack.isEmpty() && destination.stack.getCount() > menu.getSlot(best.id).getMaxStackSize(destination.stack))) { invalid = true; return; }
+            record(best, destination);
+            ItemStack previous = destination.stack; destination.stack = best.stack; best.stack = previous;
         }
     }
-
-    private static class SlotMap {
-        private final List<Pair<ItemStack, List<MySlot>>> map = new ArrayList<>();
-
-        public List<MySlot> get(ItemStack itemStack) {
-            for (Pair<ItemStack, List<MySlot>> entry : map) {
-                if (ItemStack.isSameItemSameComponents(itemStack, entry.getFirst())) {
-                    return entry.getSecond();
-                }
-            }
-
-            List<MySlot> list = new ArrayList<>();
-            map.add(Pair.of(itemStack, list));
-            return list;
-        }
-    }
-
-    private record Action(int from, int to) {
+    private static int compare(ItemStack first, ItemStack second) {
+        if (first.isEmpty() || second.isEmpty()) return Boolean.compare(first.isEmpty(), second.isEmpty());
+        int item = BuiltInRegistries.ITEM.getKey(first.getItem()).compareTo(BuiltInRegistries.ITEM.getKey(second.getItem()));
+        if (item != 0) return item;
+        int count = Integer.compare(second.getCount(), first.getCount());
+        if (count != 0) return count;
+        return Integer.compare(first.getDamageValue(), second.getDamageValue());
     }
 }

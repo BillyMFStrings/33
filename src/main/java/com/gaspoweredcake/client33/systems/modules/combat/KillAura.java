@@ -17,13 +17,15 @@ import com.gaspoweredcake.client33.utils.entity.EntityAgeTest;
 import com.gaspoweredcake.client33.utils.entity.EntityUtils;
 import com.gaspoweredcake.client33.utils.entity.SortPriority;
 import com.gaspoweredcake.client33.utils.entity.Target;
-import com.gaspoweredcake.client33.utils.entity.TargetUtils;
+import com.gaspoweredcake.client33.utils.entity.fakeplayer.FakePlayerManager;
+import com.gaspoweredcake.client33.utils.misc.TickTimer;
 import com.gaspoweredcake.client33.utils.entity.fakeplayer.FakePlayerEntity;
 import com.gaspoweredcake.client33.utils.player.FindItemResult;
 import com.gaspoweredcake.client33.utils.player.InvUtils;
 import com.gaspoweredcake.client33.utils.player.PlayerUtils;
 import com.gaspoweredcake.client33.utils.player.Rotations;
 import com.gaspoweredcake.client33.utils.world.TickRate;
+import com.gaspoweredcake.client33.utils.combat.CombatTelemetry;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.tags.ItemTags;
@@ -43,6 +45,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.*;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -52,6 +55,13 @@ public class KillAura extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgTargeting = settings.createGroup("Targeting");
     private final SettingGroup sgTiming = settings.createGroup("Timing");
+
+    private final Setting<Boolean> serverCooldown = sgTiming.add(new BoolSetting.Builder()
+        .name("server-cooldown").description("Estimate cooldown from server time packets, sent attacks and weapon speed. Falls back to 20 TPS until sampled; pauses on stale timing.")
+        .defaultValue(true).build());
+    private final Setting<Integer> cooldownMargin = sgTiming.add(new IntSetting.Builder()
+        .name("cooldown-margin-ms").description("Extra timing margin for network jitter. Custom Delay overrides cooldown timing.")
+        .defaultValue(25).range(0, 250).sliderRange(0, 250).build());
 
     // General
 
@@ -214,6 +224,22 @@ public class KillAura extends Module {
         .build()
     );
 
+    private final Setting<Boolean> keepTarget = sgTargeting.add(new BoolSetting.Builder()
+        .name("keep-target")
+        .description("Keeps the primary target until it leaves range or becomes invalid.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Double> fieldOfView = sgTargeting.add(new DoubleSetting.Builder()
+        .name("field-of-view")
+        .description("Horizontal targeting cone in degrees. 360 targets all directions.")
+        .defaultValue(360)
+        .range(1, 360)
+        .sliderRange(30, 360)
+        .build()
+    );
+
     // Timing
 
     private final Setting<Boolean> pauseOnLag = sgTiming.add(new BoolSetting.Builder()
@@ -226,7 +252,7 @@ public class KillAura extends Module {
     private final Setting<Boolean> pauseOnUse = sgTiming.add(new BoolSetting.Builder()
         .name("pause-on-use")
         .description("Does not attack while using an item.")
-        .defaultValue(false)
+        .defaultValue(true)
         .build()
     );
 
@@ -239,7 +265,7 @@ public class KillAura extends Module {
 
     private final Setting<Boolean> tpsSync = sgTiming.add(new BoolSetting.Builder()
         .name("TPS-sync")
-        .description("Tries to sync attack delay with the server's TPS.")
+        .description("Scales custom attack delays to the server tick rate.")
         .defaultValue(true)
         .build()
     );
@@ -272,7 +298,9 @@ public class KillAura extends Module {
 
     private final static Set<Item> FILTER = Set.of(Items.DIAMOND_SWORD, Items.DIAMOND_AXE, Items.DIAMOND_PICKAXE, Items.DIAMOND_SHOVEL, Items.DIAMOND_HOE, Items.MACE, Items.DIAMOND_SPEAR, Items.TRIDENT);
     private final List<Entity> targets = new ArrayList<>();
-    private int switchTimer, hitTimer;
+    private final TickTimer switchTimer = new TickTimer();
+    private final TickTimer attackTimer = new TickTimer();
+    private long attackGeneration;
     private boolean wasPathing = false;
     public boolean attacking, swapped;
     public static int previousSlot;
@@ -288,8 +316,9 @@ public class KillAura extends Module {
         wasPathing = false;
         previousSlot = -1;
         swapped = false;
-        switchTimer = 0;
-        hitTimer = 0;
+        switchTimer.reset();
+        attackTimer.reset();
+        attackGeneration++;
     }
 
     @Override
@@ -299,7 +328,11 @@ public class KillAura extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (!mc.player.isAlive() || PlayerUtils.getGameMode() == GameType.SPECTATOR) {
+        attackGeneration++;
+        switchTimer.advance();
+        attackTimer.advance();
+        if (mc.player == null || mc.level == null || mc.gameMode == null
+            || !mc.player.isAlive() || PlayerUtils.getGameMode() == GameType.SPECTATOR) {
             stopAttacking();
             return;
         }
@@ -330,8 +363,7 @@ public class KillAura extends Module {
             targets.clear();
             targets.add(mc.crosshairPickEntity);
         } else {
-            targets.clear();
-            TargetUtils.getList(targets, this::entityCheck, priority.get(), maxTargets.get());
+            collectTargets();
         }
 
         if (targets.isEmpty()) {
@@ -381,11 +413,16 @@ public class KillAura extends Module {
 
         RotationMode rotationMode = rotation.get();
         if (delayCheck()) {
-            for (Entity target : targets) {
-                if (rotationMode == RotationMode.None) attack(target);
-                else rotateTo(target, () -> {
-                    if (isActive() && attacking && mc.level != null && entityCheck(target)) attack(target);
-                });
+            long generation = attackGeneration;
+            for (Entity target : List.copyOf(targets)) {
+                Runnable hit = () -> {
+                    if (generation == attackGeneration && isActive() && attacking
+                        && mc.player != null && mc.level != null && mc.gameMode != null
+                        && target.level() == mc.level && delayCheck()
+                        && acceptableWeapon(mc.player.getMainHandItem()) && entityCheck(target)) attack(target);
+                };
+                if (rotationMode == RotationMode.None) hit.run();
+                else rotateTo(target, hit);
             }
         } else if (rotationMode == RotationMode.Always) {
             rotateTo(primary, null);
@@ -395,11 +432,12 @@ public class KillAura extends Module {
     @EventHandler
     private void onSendPacket(PacketEvent.Send event) {
         if (event.packet instanceof ServerboundSetCarriedItemPacket) {
-            switchTimer = switchDelay.get();
+            switchTimer.waitTicks(switchDelay.get());
         }
     }
 
     private void stopAttacking() {
+        attackGeneration++;
         targets.clear();
         attacking = false;
         if (wasPathing) {
@@ -418,7 +456,7 @@ public class KillAura extends Module {
 
         for (Entity target : targets) {
             if (target instanceof Player player) {
-                if (player.isBlocking()) {
+                if (Modules.get().get(ShieldPredict.class).blocks(player)) {
                     return true;
                 }
             }
@@ -432,17 +470,20 @@ public class KillAura extends Module {
         if ((entity instanceof LivingEntity livingEntity && livingEntity.isDeadOrDying()) || !entity.isAlive())
             return false;
 
-        AABB hitbox = entity.getBoundingBox();
-        if (!PlayerUtils.isWithin(
-            Mth.clamp(mc.player.getX(), hitbox.minX, hitbox.maxX),
-            Mth.clamp(mc.player.getY(), hitbox.minY, hitbox.maxY),
-            Mth.clamp(mc.player.getZ(), hitbox.minZ, hitbox.maxZ),
-            range.get()
-        )) return false;
-
         if (!entities.get().contains(entity.getType())) return false;
         if (ignoreNamed.get() && entity.hasCustomName()) return false;
-        if (!PlayerUtils.canSeeEntity(entity) && !PlayerUtils.isWithin(entity, wallsRange.get())) return false;
+        if (entity instanceof Player player && player.isSpectator()) return false;
+
+        Vec3 eye = mc.player.getEyePosition();
+        AABB hitbox = entity.getBoundingBox();
+        double dx = eye.x - Mth.clamp(eye.x, hitbox.minX, hitbox.maxX);
+        double dy = eye.y - Mth.clamp(eye.y, hitbox.minY, hitbox.maxY);
+        double dz = eye.z - Mth.clamp(eye.z, hitbox.minZ, hitbox.maxZ);
+        double distanceSquared = dx * dx + dy * dy + dz * dz;
+        if (distanceSquared > range.get() * range.get()) return false;
+        double wallReach = Math.min(range.get(), wallsRange.get());
+        if (!PlayerUtils.canSeeEntity(entity) && distanceSquared > wallReach * wallReach) return false;
+        if (Math.abs(Mth.wrapDegrees(Rotations.getYaw(entity) - mc.player.getYRot())) > fieldOfView.get() / 2) return false;
         if (ignoreTamed.get()) {
             if (entity instanceof OwnableEntity tameable
                 && tameable.getOwner() != null
@@ -457,7 +498,7 @@ public class KillAura extends Module {
         if (entity instanceof Player player) {
             if (player.isCreative()) return false;
             if (!Friends.get().shouldAttack(player)) return false;
-            if (shieldMode.get() == ShieldMode.Ignore && player.isBlocking()) return false;
+            if (shieldMode.get() == ShieldMode.Ignore && Modules.get().get(ShieldPredict.class).blocks(player)) return false;
             if (player instanceof FakePlayerEntity fakePlayer && fakePlayer.noHit) return false;
         }
         if (entity instanceof LivingEntity livingEntity) {
@@ -474,28 +515,41 @@ public class KillAura extends Module {
         return true;
     }
 
+    private void collectTargets() {
+        Entity previous = getTarget();
+        targets.clear();
+        // The world's spatial query avoids sorting every rendered entity each tick.
+        targets.addAll(mc.level.getEntities(mc.player, mc.player.getBoundingBox().inflate(range.get()), this::entityCheck));
+        FakePlayerManager.forEach(player -> {
+            if (!targets.contains(player) && entityCheck(player)) targets.add(player);
+        });
+        targets.sort((left, right) -> {
+            if (priority.get() != SortPriority.ClosestAngle) return priority.get().compare(left, right);
+            return Double.compare(angleScore(left), angleScore(right));
+        });
+        if (keepTarget.get() && previous != null && targets.remove(previous)) targets.addFirst(previous);
+        if (targets.size() > maxTargets.get()) targets.subList(maxTargets.get(), targets.size()).clear();
+    }
+
+    private double angleScore(Entity entity) {
+        double yaw = Mth.wrapDegrees(Rotations.getYaw(entity) - mc.player.getYRot());
+        double pitch = Rotations.getPitch(entity) - mc.player.getXRot();
+        return yaw * yaw + pitch * pitch;
+    }
+
     private boolean delayCheck() {
-        if (switchTimer > 0) {
-            switchTimer--;
-            return false;
-        }
-
-        float delay = (customDelay.get()) ? hitDelay.get() : 0.5f;
-        if (tpsSync.get()) delay /= (TickRate.INSTANCE.getTickRate() / 20);
-
-        if (customDelay.get()) {
-            if (hitTimer < delay) {
-                hitTimer++;
-                return false;
-            } else return true;
-        } else return mc.player.getAttackStrengthScale(delay) >= 1;
+        if (!switchTimer.ready()) return false;
+        if (customDelay.get()) return attackTimer.ready();
+        if (mc.player.getAttackStrengthScale(0) < 1) return false;
+        return !serverCooldown.get() || CombatTelemetry.CLOCK.ready(CombatTelemetry.now(),
+            mc.player.getCurrentItemAttackStrengthDelay(), cooldownMargin.get());
     }
 
     private void attack(Entity target) {
         mc.gameMode.attack(mc.player, target);
         mc.player.swing(InteractionHand.MAIN_HAND);
 
-        hitTimer = 0;
+        attackTimer.waitTicks(TickTimer.serverDelay(hitDelay.get(), TickRate.INSTANCE.getTickRate(), tpsSync.get()));
     }
 
     private void rotateTo(Entity target, Runnable callback) {

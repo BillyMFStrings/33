@@ -180,6 +180,8 @@ public abstract class WContainer extends WWidget {
 
     @Override
     public void mouseMoved(double mouseX, double mouseY, double lastMouseX, double lastMouseY) {
+        // Nested views must see the current hover state when routing this movement.
+        super.mouseMoved(mouseX, mouseY, lastMouseX, lastMouseY);
         try {
             for (Cell<?> cell : cells) {
                 if (propagateEvents(cell.widget())) cell.widget().mouseMoved(mouseX, mouseY, lastMouseX, lastMouseY);
@@ -187,7 +189,6 @@ public abstract class WContainer extends WWidget {
         } catch (ConcurrentModificationException _) {
         }
 
-        super.mouseMoved(mouseX, mouseY, lastMouseX, lastMouseY);
     }
 
     @Override

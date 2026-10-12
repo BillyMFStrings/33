@@ -5,7 +5,7 @@
 
 package com.gaspoweredcake.client33.systems;
 
-import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
+import java.util.LinkedHashMap;
 import com.gaspoweredcake.client33.Client33;
 import com.gaspoweredcake.client33.events.game.GameLeftEvent;
 import com.gaspoweredcake.client33.systems.accounts.Accounts;
@@ -26,7 +26,7 @@ import java.util.Map;
 
 public class Systems {
     @SuppressWarnings("rawtypes")
-    private static final Map<Class<? extends System>, System<?>> systems = new Reference2ReferenceOpenHashMap<>();
+    private static final Map<Class<? extends System>, System<?>> systems = new LinkedHashMap<>();
     private static final List<Runnable> preLoadTasks = new ArrayList<>(1);
 
     public static void addPreLoadTask(Runnable task) {
@@ -39,7 +39,6 @@ public class Systems {
 
         Config config = new Config();
         System<?> configSystem = add(config);
-        configSystem.init();
         configSystem.load();
 
         // Registers the colors from config tab. This allows rainbow colours to work for friends.
@@ -72,12 +71,12 @@ public class Systems {
     }
 
     public static void save(File folder) {
-        long start = java.lang.System.currentTimeMillis();
+        long start = java.lang.System.nanoTime();
         Client33.LOG.info("Saving");
 
         for (System<?> system : systems.values()) system.save(folder);
 
-        Client33.LOG.info("Saved in {} milliseconds.", java.lang.System.currentTimeMillis() - start);
+        Client33.LOG.info("Saved in {} milliseconds.", (java.lang.System.nanoTime() - start) / 1_000_000);
     }
 
     public static void save() {
@@ -85,13 +84,13 @@ public class Systems {
     }
 
     public static void load(File folder) {
-        long start = java.lang.System.currentTimeMillis();
+        long start = java.lang.System.nanoTime();
         Client33.LOG.info("Loading");
 
         for (Runnable task : preLoadTasks) task.run();
         for (System<?> system : systems.values()) system.load(folder);
 
-        Client33.LOG.info("Loaded in {} milliseconds", java.lang.System.currentTimeMillis() - start);
+        Client33.LOG.info("Loaded in {} milliseconds", (java.lang.System.nanoTime() - start) / 1_000_000);
     }
 
     public static void load() {

@@ -77,6 +77,11 @@ public class SessionAccount extends Account<SessionAccount> implements TokenAcco
     }
 
     @Override
+    public int hashCode() {
+        return java.util.Objects.hashCode(name);
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (!(o instanceof SessionAccount account2)) return false;
         return account2.name.equals(this.name);

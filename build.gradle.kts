@@ -259,3 +259,20 @@ publishing {
     }
 
 }
+
+// Pure module math can be checked without launching a Minecraft client.
+val regression = sourceSets.create("regression") {
+    compileClasspath += sourceSets.main.get().output
+    runtimeClasspath += sourceSets.main.get().output + configurations.runtimeClasspath.get()
+}
+val moduleLogicRegression = tasks.register<JavaExec>("moduleLogicRegression") {
+    group = "verification"
+    description = "Checks persistence failures, recon parsing, combat timing/risk, and ESP projection boundaries."
+    dependsOn(tasks.named(regression.classesTaskName))
+    classpath = regression.runtimeClasspath
+    mainClass.set("com.gaspoweredcake.client33.ModuleLogicRegression")
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(libs.versions.jdk.get().toInt()))
+    })
+}
+tasks.check { dependsOn(moduleLogicRegression) }
